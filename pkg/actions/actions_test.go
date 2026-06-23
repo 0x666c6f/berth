@@ -64,6 +64,42 @@ command = "echo no"
 	}
 }
 
+func TestLoadFilesRejectsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "actions.toml")
+	if err := os.WriteFile(path, []byte(`
+[actions.test]
+command = "echo ok"
+bogus = true
+`), 0o600); err != nil {
+		t.Fatalf("write actions: %v", err)
+	}
+
+	_, err := LoadFiles([]string{path})
+	if err == nil {
+		t.Fatal("expected unknown key error")
+	}
+}
+
+func TestLoadFilesRejectsEscapingCWD(t *testing.T) {
+	for _, cwd := range []string{"/tmp", "../outside", "sub/../../outside"} {
+		t.Run(cwd, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "actions.toml")
+			if err := os.WriteFile(path, []byte(`
+[actions.test]
+command = "echo ok"
+cwd = "`+cwd+`"
+`), 0o600); err != nil {
+				t.Fatalf("write actions: %v", err)
+			}
+
+			_, err := LoadFiles([]string{path})
+			if err == nil {
+				t.Fatal("expected invalid cwd error")
+			}
+		})
+	}
+}
+
 func TestLoadFilesMissingFilesAreIgnored(t *testing.T) {
 	catalog, err := LoadFiles([]string{filepath.Join(t.TempDir(), "missing.toml")})
 	if err != nil {

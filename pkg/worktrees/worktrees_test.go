@@ -90,6 +90,24 @@ func TestPrepareReportsBranchConflict(t *testing.T) {
 	}
 }
 
+func TestPrepareRejectsUnsafeBranchSuffix(t *testing.T) {
+	repo := initRepo(t)
+	for _, branch := range []string{"feature.", "feature/"} {
+		t.Run(branch, func(t *testing.T) {
+			_, err := Prepare(Options{
+				RepoRoot:      repo,
+				ContainerName: "agent-claude-branch",
+				Path:          filepath.Join(t.TempDir(), "branch"),
+				Branch:        branch,
+				DryRun:        true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "invalid worktree branch") {
+				t.Fatalf("Prepare() error = %v, want invalid branch", err)
+			}
+		})
+	}
+}
+
 func TestCopyIncludesRejectsEscapesAndSymlinks(t *testing.T) {
 	repo := initRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt")
@@ -125,6 +143,8 @@ func initRepo(t *testing.T) string {
 	runGit(t, repo, "init")
 	runGit(t, repo, "config", "user.email", "agent@example.com")
 	runGit(t, repo, "config", "user.name", "Agent")
+	runGit(t, repo, "config", "commit.gpgsign", "false")
+	runGit(t, repo, "config", "tag.gpgsign", "false")
 	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("tracked\n"), 0o600); err != nil {
 		t.Fatalf("write tracked: %v", err)
 	}

@@ -84,8 +84,17 @@ func loadFile(path string) ([]Action, error) {
 	}
 
 	var file File
-	if _, err := toml.DecodeFile(path, &file); err != nil {
+	md, err := toml.DecodeFile(path, &file)
+	if err != nil {
 		return nil, fmt.Errorf("parse actions file %q: %w", path, err)
+	}
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, key := range undecoded {
+			keys = append(keys, key.String())
+		}
+		sort.Strings(keys)
+		return nil, fmt.Errorf("unsupported action keys in %q: %s", path, strings.Join(keys, ", "))
 	}
 
 	var result []Action
@@ -107,7 +116,15 @@ func validateAction(action Action) error {
 	if strings.TrimSpace(action.Command) == "" {
 		return fmt.Errorf("action %q has empty command", action.Name)
 	}
-	if strings.Contains(action.CWD, "\x00") {
+	cwd := strings.TrimSpace(action.CWD)
+	if strings.Contains(cwd, "\x00") {
+		return fmt.Errorf("action %q has invalid cwd", action.Name)
+	}
+	if cwd == "" {
+		return nil
+	}
+	clean := filepath.Clean(cwd)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("action %q has invalid cwd", action.Name)
 	}
 	return nil

@@ -142,6 +142,11 @@ func runWorkspacePatch(target, patchFile string, requireClean bool, gitArgs []st
 	if err := validateWorkspacePatch(data); err != nil {
 		return err
 	}
+	localPatch, err := writeTempWorkspacePatch(data)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(localPatch)
 
 	ctx := context.Background()
 	exec := newExecutor()
@@ -149,14 +154,29 @@ func runWorkspacePatch(target, patchFile string, requireClean bool, gitArgs []st
 	if err != nil {
 		return err
 	}
+	base := filepath.Base(localPatch)
+	vmPatch := filepath.Join("/tmp", base)
+	containerPatch := filepath.Join("/tmp", base)
+	if err := copyFileToVM(configuredVMName(), localPatch, vmPatch); err != nil {
+		return fmt.Errorf("copy patch to VM: %w", err)
+	}
+	defer func() {
+		_, _ = exec.Run(ctx, "rm", "-f", vmPatch)
+	}()
+	if _, err := exec.Run(ctx, "docker", "cp", vmPatch, name+":"+containerPatch); err != nil {
+		return fmt.Errorf("copy patch into %s: %w", name, err)
+	}
+	defer func() {
+		_, _ = exec.Run(ctx, "docker", "exec", name, "rm", "-f", containerPatch)
+	}()
 	if requireClean {
-		checkArgs := append(append([]string{}, gitArgs...), "--check")
+		checkArgs := append(append([]string{}, gitArgs...), "--check", containerPatch)
 		if _, err := exec.Run(ctx, workspaceExecCommand(name, checkArgs...)...); err != nil {
 			return fmt.Errorf("patch does not apply cleanly in %s: %w", name, err)
 		}
 	}
-	command := fmt.Sprintf("%s <<'SAFE_AGENTIC_PATCH'\n%s\nSAFE_AGENTIC_PATCH", shellJoin(gitArgs), string(data))
-	out, err := exec.Run(ctx, workspaceExecCommand(name, "bash", "-lc", command)...)
+	args := append(append([]string{}, gitArgs...), containerPatch)
+	out, err := exec.Run(ctx, workspaceExecCommand(name, args...)...)
 	if err != nil {
 		return fmt.Errorf("%s in %s: %w", strings.Join(gitArgs[:2], " "), name, err)
 	}
@@ -166,12 +186,22 @@ func runWorkspacePatch(target, patchFile string, requireClean bool, gitArgs []st
 	return nil
 }
 
-func shellJoin(args []string) string {
-	quoted := make([]string, 0, len(args))
-	for _, arg := range args {
-		quoted = append(quoted, shellQuote(arg))
+func writeTempWorkspacePatch(data []byte) (string, error) {
+	f, err := os.CreateTemp("", "safe-agentic-patch-*.patch")
+	if err != nil {
+		return "", fmt.Errorf("create temp patch: %w", err)
 	}
-	return strings.Join(quoted, " ")
+	path := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("write temp patch: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close temp patch: %w", err)
+	}
+	return path, nil
 }
 
 func validateWorkspacePatch(data []byte) error {

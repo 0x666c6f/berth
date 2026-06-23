@@ -59,6 +59,7 @@ func (s Store) Add(comment Comment) (Comment, error) {
 		return Comment{}, fmt.Errorf("open review comments: %w", err)
 	}
 	defer f.Close()
+	// Preserve private permissions if an older comments file already exists.
 	if err := f.Chmod(0o600); err != nil {
 		return Comment{}, fmt.Errorf("chmod review comments: %w", err)
 	}

@@ -34,7 +34,7 @@ type Worktree struct {
 	CreatedAt string   `json:"created_at"`
 }
 
-var branchRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+var branchRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?$`)
 
 func DefaultPath(containerName string) string {
 	return filepath.Join(config.UserDir(), "worktrees", containerName)
@@ -185,6 +185,7 @@ func AppendRegistry(path string, wt Worktree) error {
 		return fmt.Errorf("open worktree registry: %w", err)
 	}
 	defer f.Close()
+	// Preserve private permissions if an older registry file already exists.
 	if err := f.Chmod(0o600); err != nil {
 		return fmt.Errorf("chmod worktree registry: %w", err)
 	}

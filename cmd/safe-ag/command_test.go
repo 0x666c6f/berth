@@ -811,18 +811,30 @@ func TestWorkspacePatchOperations(t *testing.T) {
 	if err := runWorkspaceStagePatch(workspaceStagePatchCmd, []string{containerName, rel}); err != nil {
 		t.Fatalf("runWorkspaceStagePatch() error = %v", err)
 	}
-	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "'git' 'apply' '--cached' '--whitespace=nowarn'") {
-		t.Fatalf("stage patch command = %s", got)
+	if cmds := fake.CommandsMatching("docker cp /tmp/safe-agentic-patch-"); len(cmds) == 0 {
+		t.Fatal("expected docker cp for staged patch")
+	}
+	stageCmds := fake.CommandsMatching("git apply --cached --whitespace=nowarn /tmp/safe-agentic-patch-")
+	if len(stageCmds) == 0 {
+		t.Fatalf("expected staged patch apply command, got %#v", fake.Log)
+	}
+	if strings.Contains(strings.Join(stageCmds[0], " "), "SAFE_AGENTIC_PATCH") {
+		t.Fatalf("stage patch still uses heredoc: %s", strings.Join(stageCmds[0], " "))
 	}
 
+	fake.Reset()
+	fake.SetResponse("docker ps -a --filter name=^agent-", containerName+"\n")
 	oldYes := workspaceYes
 	workspaceYes = true
 	defer func() { workspaceYes = oldYes }()
 	if err := runWorkspaceRevertPatch(workspaceRevertPatchCmd, []string{containerName, rel}); err != nil {
 		t.Fatalf("runWorkspaceRevertPatch() error = %v", err)
 	}
-	if got := strings.Join(fake.LastCommand(), " "); !strings.Contains(got, "'git' 'apply' '--reverse' '--whitespace=nowarn'") {
-		t.Fatalf("revert patch command = %s", got)
+	if cmds := fake.CommandsMatching("git apply --reverse --whitespace=nowarn --check /tmp/safe-agentic-patch-"); len(cmds) == 0 {
+		t.Fatalf("expected revert preflight with patch file, got %#v", fake.Log)
+	}
+	if cmds := fake.CommandsMatching("git apply --reverse --whitespace=nowarn /tmp/safe-agentic-patch-"); len(cmds) == 0 {
+		t.Fatalf("expected revert patch apply command, got %#v", fake.Log)
 	}
 }
 

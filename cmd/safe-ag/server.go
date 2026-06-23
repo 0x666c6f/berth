@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	actionpkg "github.com/0x666c6f/safe-agentic/pkg/actions"
 	"github.com/0x666c6f/safe-agentic/pkg/docker"
@@ -88,7 +90,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--listen requires --token or SAFE_AGENTIC_SERVER_TOKEN")
 		}
 		fmt.Printf("safe-ag server listening on %s\n", serverListen)
-		return http.ListenAndServe(serverListen, serverHTTPHandler(token))
+		srv := &http.Server{
+			Addr:         serverListen,
+			Handler:      serverHTTPHandler(token),
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+		return srv.ListenAndServe()
 	}
 	if !serverStdio {
 		return fmt.Errorf("set --stdio or --listen")
@@ -141,7 +150,7 @@ func serverHTTPHandler(token string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); got == "" || got != token {
+		if got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
