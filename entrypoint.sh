@@ -363,7 +363,7 @@ if [ -n "${SAFE_AGENTIC_INSTRUCTIONS_B64:-}" ]; then
   fi
 fi
 
-# shellcheck disable=SC2329 # Invoked indirectly by EXIT trap.
+# shellcheck disable=SC2317,SC2329 # Invoked indirectly by EXIT trap.
 run_on_exit_callback() {
   run_callback "on-exit" "${SAFE_AGENTIC_ON_EXIT_B64:-}"
 }
