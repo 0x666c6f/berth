@@ -353,6 +353,10 @@ func appleContainerNATSubnets() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list Apple container networks: %w", err)
 	}
+	return parseAppleContainerNATSubnets(out)
+}
+
+func parseAppleContainerNATSubnets(out []byte) ([]string, error) {
 	var networks []struct {
 		Configuration struct {
 			Mode       string `json:"mode"`
@@ -389,6 +393,10 @@ func defaultHostInterface() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detect default host interface: %w", err)
 	}
+	return parseDefaultHostInterface(out)
+}
+
+func parseDefaultHostInterface(out []byte) (string, error) {
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 2 && fields[0] == "interface:" {

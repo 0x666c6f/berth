@@ -4,9 +4,9 @@ set -eu
 
 TOTAL_STEPS=5
 step() {
-  local number="$1"
+  step_number="$1"
   shift
-  echo "==> [$number/$TOTAL_STEPS] $*"
+  echo "==> [$step_number/$TOTAL_STEPS] $*"
 }
 
 as_root() {
