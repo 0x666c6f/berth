@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	pathpkg "path"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/0x666c6f/safe-agentic/pkg/repourl"
+	"github.com/0x666c6f/safe-agentic/pkg/risk"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -51,65 +54,67 @@ func ShowOverlayLive(app *App, name string, title string, content string) *tview
 func ShowCopyForm(app *App, containerName string) {
 	form := tview.NewForm().
 		AddInputField("Agent path:", "/workspace/", 40, nil, nil).
-		AddInputField("VM path (pull dest):", "./", 40, nil, nil).
-		AddInputField("VM source (push):", "./", 40, nil, nil).
+		AddInputField("VM path (pull dest):", "/tmp/", 40, nil, nil).
+		AddInputField("VM source (push):", "/tmp/", 40, nil, nil).
 		AddInputField("Agent path (push dest):", "/workspace/", 40, nil, nil)
 
 	form.AddButton("Pull", func() {
-		containerPath := form.GetFormItemByLabel("Agent path:").(*tview.InputField).GetText()
-		hostPath := form.GetFormItemByLabel("VM path (pull dest):").(*tview.InputField).GetText()
-
-		app.pages.SwitchToPage("main")
-		app.pages.RemovePage("copy")
-		app.tapp.SetFocus(app.table.Table())
-
-		if containerPath == "" || hostPath == "" {
-			app.footer.ShowStatus("Both paths required", true)
+		agentPath, err := cleanAgentCopyPath(form.GetFormItemByLabel("Agent path:").(*tview.InputField).GetText())
+		if err != nil {
+			app.footer.ShowStatus(err.Error(), true)
+			app.tapp.SetFocus(form)
+			return
+		}
+		vmPath, err := cleanVMCopyPath(form.GetFormItemByLabel("VM path (pull dest):").(*tview.InputField).GetText(), "VM pull destination")
+		if err != nil {
+			app.footer.ShowStatus(err.Error(), true)
+			app.tapp.SetFocus(form)
 			return
 		}
 
+		closeCopyForm(app)
 		app.footer.ShowStatus("Copying...", false)
 		go func() {
-			out, err := execVM("docker", "cp", containerName+":"+containerPath, hostPath)
+			out, err := execVM("docker", "cp", containerName+":"+agentPath, vmPath)
 			app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
 					app.footer.ShowStatus("Copy failed: "+string(out), true)
 				} else {
-					app.footer.ShowStatus("Copied to "+hostPath, false)
+					app.footer.ShowStatus("Copied to "+vmPath, false)
 				}
 			})
 		}()
 	})
 	form.AddButton("Push", func() {
-		hostPath := form.GetFormItemByLabel("VM source (push):").(*tview.InputField).GetText()
-		containerPath := form.GetFormItemByLabel("Agent path (push dest):").(*tview.InputField).GetText()
-
-		app.pages.SwitchToPage("main")
-		app.pages.RemovePage("copy")
-		app.tapp.SetFocus(app.table.Table())
-
-		if hostPath == "" || containerPath == "" {
-			app.footer.ShowStatus("Both paths required", true)
+		vmPath, err := cleanVMCopyPath(form.GetFormItemByLabel("VM source (push):").(*tview.InputField).GetText(), "VM push source")
+		if err != nil {
+			app.footer.ShowStatus(err.Error(), true)
+			app.tapp.SetFocus(form)
+			return
+		}
+		agentPath, err := cleanAgentCopyPath(form.GetFormItemByLabel("Agent path (push dest):").(*tview.InputField).GetText())
+		if err != nil {
+			app.footer.ShowStatus(err.Error(), true)
+			app.tapp.SetFocus(form)
 			return
 		}
 
+		closeCopyForm(app)
 		app.footer.ShowStatus("Pushing...", false)
 		go func() {
-			out, err := execVM("docker", "cp", hostPath, containerName+":"+containerPath)
+			out, err := execVM("docker", "cp", vmPath, containerName+":"+agentPath)
 			app.tapp.QueueUpdateDraw(func() {
 				if err != nil {
 					app.footer.ShowStatus("Push failed: "+string(out), true)
 				} else {
-					app.footer.ShowStatus("Pushed to "+containerPath, false)
+					app.footer.ShowStatus("Pushed to "+agentPath, false)
 				}
 			})
 		}()
 	})
 
 	form.AddButton("Cancel", func() {
-		app.pages.SwitchToPage("main")
-		app.pages.RemovePage("copy")
-		app.tapp.SetFocus(app.table.Table())
+		closeCopyForm(app)
 	})
 
 	form.SetBorder(true).
@@ -130,6 +135,50 @@ func ShowCopyForm(app *App, containerName string) {
 
 	app.pages.AddAndSwitchToPage("copy", modal, true)
 	app.tapp.SetFocus(form)
+}
+
+func closeCopyForm(app *App) {
+	app.pages.SwitchToPage("main")
+	app.pages.RemovePage("copy")
+	app.tapp.SetFocus(app.table.Table())
+}
+
+func cleanAgentCopyPath(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return "", fmt.Errorf("agent path required")
+	}
+	if strings.ContainsRune(raw, 0) {
+		return "", fmt.Errorf("agent path contains NUL byte")
+	}
+	if strings.Contains(raw, ":") {
+		return "", fmt.Errorf("agent path must not contain ':'")
+	}
+	if !strings.HasPrefix(raw, "/") {
+		return "", fmt.Errorf("agent path must be absolute under /workspace")
+	}
+	clean := pathpkg.Clean(raw)
+	if clean != "/workspace" && !strings.HasPrefix(clean, "/workspace/") {
+		return "", fmt.Errorf("agent path must stay under /workspace")
+	}
+	return clean, nil
+}
+
+func cleanVMCopyPath(value string, field string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return "", fmt.Errorf("%s required", field)
+	}
+	if strings.ContainsRune(raw, 0) {
+		return "", fmt.Errorf("%s contains NUL byte", field)
+	}
+	if strings.Contains(raw, ":") {
+		return "", fmt.Errorf("%s must be a VM path, not Docker container:path syntax", field)
+	}
+	if !filepath.IsAbs(raw) {
+		return "", fmt.Errorf("%s must be an absolute VM path", field)
+	}
+	return filepath.Clean(raw), nil
 }
 
 // ShowSpawnForm shows a modal form for spawning a new agent.
@@ -154,6 +203,9 @@ func ShowSpawnForm(app *App) {
 
 	form.AddButton("Spawn", func() {
 		spec := readSpawnForm(form, agentType, defaults)
+		if promptSpawnRiskConfirm(app, form, spec) {
+			return
+		}
 		closeSpawnForm(app)
 		runSpawnFormSubmit(app, spec)
 	})
@@ -253,6 +305,49 @@ func closeSpawnForm(app *App) {
 	app.pages.SwitchToPage("main")
 	app.pages.RemovePage("spawn")
 	app.tapp.SetFocus(app.table.Table())
+}
+
+func promptSpawnRiskConfirm(app *App, form *tview.Form, spec spawnFormSpec) bool {
+	notices := spawnFormRiskNotices(spec)
+	if len(notices) == 0 {
+		return false
+	}
+	app.footer.ShowConfirm(spawnRiskConfirmMessage(notices), func(yes bool) {
+		if !yes {
+			app.tapp.SetFocus(form)
+			return
+		}
+		app.tapp.QueueUpdateDraw(func() {
+			closeSpawnForm(app)
+			runSpawnFormSubmit(app, spec)
+		})
+	})
+	return true
+}
+
+func spawnFormRiskNotices(spec spawnFormSpec) []risk.Notice {
+	sshEnabled := spec.ssh || repourl.UsesSSH(spec.repoURL)
+	return risk.SpawnNotices(risk.SpawnInput{
+		SSH:          sshEnabled,
+		ReuseAuth:    spec.reuseAuth,
+		ReuseGHAuth:  spec.reuseGHAuth,
+		SeedAuth:     spec.seedAuth,
+		AWSProfile:   spec.awsProfile,
+		Docker:       spec.docker,
+		DockerSocket: spec.dockerSocket,
+	})
+}
+
+func spawnRiskConfirmMessage(notices []risk.Notice) string {
+	var flags []string
+	for _, notice := range notices {
+		flags = append(flags, notice.Flag)
+	}
+	const maxFlags = 3
+	if len(flags) > maxFlags {
+		flags = append(flags[:maxFlags], fmt.Sprintf("+%d more", len(flags)-maxFlags))
+	}
+	return fmt.Sprintf("Spawn widens sandbox (%s). Continue?", strings.Join(flags, ", "))
 }
 
 func runSpawnFormSubmit(app *App, spec spawnFormSpec) {

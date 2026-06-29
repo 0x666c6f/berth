@@ -108,6 +108,16 @@ func TestAddBindMount(t *testing.T) {
 	}
 }
 
+func TestAddBindMountRejectsMountOptionCharacters(t *testing.T) {
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for comma in bind source")
+		}
+	}()
+	cmd.AddBindMount("/tmp/worktree,dst=/host", "/workspace", false)
+}
+
 func TestAddEphemeralVolume(t *testing.T) {
 	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
 	cmd.AddEphemeralVolume("/workspace")

@@ -123,7 +123,7 @@ func init() {
 	f.StringVar(&spawnOpts.MaxCost, "max-cost", "", "Kill if estimated cost exceeds budget")
 	f.StringVar(&spawnOpts.Notify, "notify", "", "Notification targets")
 	f.StringVar(&spawnOpts.FleetVolume, "fleet-volume", "", "Shared fleet volume name")
-	f.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed host git worktree from the current checkout")
+	f.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed git worktree from the current checkout")
 	f.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
 	f.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
 	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "Include file for ignored local files; defaults to .safe-aginclude")
@@ -148,7 +148,7 @@ func init() {
 	rf.BoolVar(&spawnOpts.NoDockerSocket, "no-docker-socket", false, "Disable default host Docker socket")
 	rf.BoolVar(&spawnOpts.Background, "background", false, "Background mode")
 	rf.BoolVar(&spawnOpts.AllowSetupScripts, "allow-setup-scripts", false, "Allow repo-provided safe-agentic.json setup hooks to run")
-	rf.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed host git worktree from the current checkout")
+	rf.BoolVar(&spawnOpts.Worktree, "worktree", false, "Create and mount a managed git worktree from the current checkout")
 	rf.StringVar(&spawnOpts.WorktreeBranch, "worktree-branch", "", "Branch name for --worktree")
 	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Destination path for --worktree")
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Dry run")
@@ -217,10 +217,13 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := validateResolvedSpawn(resolved); err != nil {
 		return err
 	}
-	if err := prepareSpawnWorktree(opts, &resolved); err != nil {
+	if err := prepareSpawnWorktree(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
 	if err := prepareSpawnNetwork(ctx, exec, opts, &resolved); err != nil {
+		return err
+	}
+	if err := prepareSpawnResourceLimits(ctx, exec, opts, &resolved); err != nil {
 		return err
 	}
 
@@ -244,6 +247,7 @@ func executeSpawn(opts SpawnOpts) error {
 	if err := appendDockerMode(ctx, exec, cmd, opts, resolved); err != nil {
 		return err
 	}
+	printSpawnRiskSummary(os.Stdout, opts, resolved)
 	if opts.DryRun {
 		fmt.Printf("Would execute inside VM %s:\n", configuredVMName())
 		fmt.Printf("  %s\n", cmd.Render())
@@ -272,9 +276,22 @@ type spawnResolved struct {
 	WorktreeBranch string
 }
 
-func prepareSpawnWorktree(opts SpawnOpts, resolved *spawnResolved) error {
+func prepareSpawnWorktree(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
 	if !opts.Worktree {
 		return nil
+	}
+	candidate, err := worktreeCandidatePath(resolved.ContainerName, opts.WorktreePath)
+	if err != nil {
+		return err
+	}
+	if err := rejectKnownMaskedWorktreePath(candidate); err != nil {
+		return err
+	}
+	if err := validateWorktreeMountPath(candidate); err != nil {
+		return err
+	}
+	if err := ensureWorktreeParentVisibleInVM(ctx, exec, candidate, opts.DryRun); err != nil {
+		return err
 	}
 	wt, err := worktrees.Prepare(worktrees.Options{
 		ContainerName: resolved.ContainerName,
@@ -478,6 +495,33 @@ func prepareSpawnNetwork(ctx context.Context, exec vmexec.Executor, opts SpawnOp
 	resolved.NetworkName = networkName
 	resolved.NetworkMode = networkMode
 	return nil
+}
+
+func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts SpawnOpts, resolved *spawnResolved) error {
+	// Run in dry-run too: it queries the VM read-only and the stripping below
+	// changes the command we print, so skipping it would make --dry-run show
+	// --memory/--cpus flags that the real launch path drops on threaded-cgroup VMs.
+	if resolved.Memory == "" && resolved.CPUs == "" {
+		return nil
+	}
+	if !dockerCgroupIsThreaded(ctx, exec) {
+		return nil
+	}
+	if opts.Memory != "" || opts.CPUs != "" {
+		return fmt.Errorf("VM Docker cgroup is threaded; Docker rejects explicit --memory/--cpus limits on this VM")
+	}
+	fmt.Fprintln(os.Stderr, "warning: VM Docker cgroup is threaded; omitting default --memory/--cpus limits because Docker rejects them here")
+	resolved.Memory = ""
+	resolved.CPUs = ""
+	return nil
+}
+
+func dockerCgroupIsThreaded(ctx context.Context, exec vmexec.Executor) bool {
+	out, err := exec.Run(ctx, "bash", "-lc", "cat /sys/fs/cgroup/docker/cgroup.type 2>/dev/null || true")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.TrimSpace(string(out)), "threaded")
 }
 
 func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunCmd {
@@ -791,10 +835,40 @@ func maybeAttachSpawn(ctx context.Context, exec vmexec.Executor, opts SpawnOpts,
 		fmt.Printf("Not attaching to %s: stdin is not a terminal. Use --background to silence this message.\n", resolved.ContainerName)
 		return nil
 	}
-	if err := tmux.WaitForSession(ctx, exec, resolved.ContainerName); err != nil {
+	if err := waitForSessionOrExit(ctx, exec, resolved.ContainerName); err != nil {
 		return err
 	}
 	return tmux.Attach(exec, resolved.ContainerName)
+}
+
+// waitForSessionOrExit blocks until the agent's tmux session is ready, or
+// returns immediately with the container's failure logs if it exits first.
+// Without the liveness check the caller would poll a dead container for the
+// full WaitForSession timeout (≈60s), which looks like a hang.
+func waitForSessionOrExit(ctx context.Context, exec vmexec.Executor, name string) error {
+	for i := 0; i < 300; i++ {
+		if has, _ := tmux.HasSession(ctx, exec, name); has {
+			return nil
+		}
+		if running, err := docker.IsRunning(ctx, exec, name); err == nil && !running {
+			return containerExitedError(ctx, exec, name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("tmux session not ready after 60s in container %s", name)
+}
+
+func containerExitedError(ctx context.Context, exec vmexec.Executor, name string) error {
+	code, _ := docker.ExitCode(ctx, exec, name)
+	msg := fmt.Sprintf("container %s exited (code %d) before the agent session started", name, code)
+	if logs, err := docker.TailLogs(ctx, exec, name, 20); err == nil && logs != "" {
+		msg += ":\n" + logs
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 func resolveContainerName(agentType, name, timestamp string, repos []string) string {

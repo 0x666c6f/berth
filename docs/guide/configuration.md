@@ -258,6 +258,7 @@ Use:
 - `setup` for first run
 - `update` after Dockerfile/image changes
 - `vm start` if the VM was stopped and you want hardening re-applied
+- `diagnose` to check VM/image readiness and spot risky spawn defaults before you launch agents
 
 ## Advanced environment variables
 

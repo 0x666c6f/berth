@@ -124,6 +124,11 @@ Rules:
 - default branch is `safe-ag/<container-name>`
 - ignored local files listed in `.safe-aginclude` are copied into the worktree
 
+Important limitation:
+- the worktree path must be visible inside the Apple container machine
+- hardened macOS machines mask `/Users`, `/Volumes`, `/private`, and `/mnt/mac`
+- on that default hardened setup, prefer `--repo` for the agent run and `handoff --to-local` when you need to inspect or keep the result locally
+
 Handoff:
 
 ```bash

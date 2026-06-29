@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/0x666c6f/safe-agentic/pkg/risk"
 )
 
 func TestOverlayHelpers(t *testing.T) {
@@ -94,6 +96,82 @@ func TestBuildSpawnFormArgs_ExplicitDockerSocket(t *testing.T) {
 	}
 }
 
+func TestSpawnFormRiskNotices(t *testing.T) {
+	notices := spawnFormRiskNotices(spawnFormSpec{
+		agentType:    "claude",
+		repoURL:      "git@github.com:org/repo.git",
+		awsProfile:   "dev",
+		dockerSocket: true,
+	})
+	got := riskFlags(notices)
+	for _, want := range []string{"--ssh", "--aws dev", "--docker-socket"} {
+		if !containsString(got, want) {
+			t.Fatalf("risk flags = %v, missing %s", got, want)
+		}
+	}
+}
+
+func TestSpawnRiskConfirmMessageTruncates(t *testing.T) {
+	msg := spawnRiskConfirmMessage(spawnFormRiskNotices(spawnFormSpec{
+		agentType:    "shell",
+		repoURL:      "git@github.com:org/repo.git",
+		reuseAuth:    true,
+		reuseGHAuth:  true,
+		seedAuth:     true,
+		awsProfile:   "dev",
+		dockerSocket: true,
+	}))
+	if !strings.Contains(msg, "Spawn widens sandbox") || !strings.Contains(msg, "+3 more") {
+		t.Fatalf("confirm message = %q", msg)
+	}
+}
+
+func TestCleanAgentCopyPathRestrictsWorkspace(t *testing.T) {
+	got, err := cleanAgentCopyPath(" /workspace/../workspace/src/./app.go ")
+	if err != nil {
+		t.Fatalf("cleanAgentCopyPath() error = %v", err)
+	}
+	if got != "/workspace/src/app.go" {
+		t.Fatalf("cleanAgentCopyPath() = %q", got)
+	}
+
+	for _, value := range []string{
+		"",
+		"workspace/file.txt",
+		"/home/agent/.codex/auth.json",
+		"/workspace/../../home/agent/.ssh/id_ed25519",
+		"/workspace/file:with-colon",
+		"/workspace/\x00secret",
+	} {
+		if _, err := cleanAgentCopyPath(value); err == nil {
+			t.Fatalf("cleanAgentCopyPath(%q) expected error", value)
+		}
+	}
+}
+
+func TestCleanVMCopyPathRequiresAbsoluteLocalPath(t *testing.T) {
+	got, err := cleanVMCopyPath(" /tmp/out/../session.txt ", "VM source")
+	if err != nil {
+		t.Fatalf("cleanVMCopyPath() error = %v", err)
+	}
+	if got != "/tmp/session.txt" {
+		t.Fatalf("cleanVMCopyPath() = %q", got)
+	}
+
+	for _, value := range []string{
+		"",
+		"./session.txt",
+		"relative/session.txt",
+		"other-container:/tmp/session.txt",
+		"/tmp/file:with-colon",
+		"/tmp/\x00session.txt",
+	} {
+		if _, err := cleanVMCopyPath(value, "VM source"); err == nil {
+			t.Fatalf("cleanVMCopyPath(%q) expected error", value)
+		}
+	}
+}
+
 func TestExecuteSpawnFormRejectsDockerModeConflict(t *testing.T) {
 	_, err := executeSpawnForm(spawnFormSpec{
 		agentType:    "claude",
@@ -115,6 +193,23 @@ func TestSpawnedContainerNameParsesCLIOutput(t *testing.T) {
 func hasArg(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func riskFlags(notices []risk.Notice) []string {
+	var flags []string
+	for _, notice := range notices {
+		flags = append(flags, notice.Flag)
+	}
+	return flags
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

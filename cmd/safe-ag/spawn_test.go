@@ -12,6 +12,34 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
+func TestWaitForSessionOrExit_SessionReady(t *testing.T) {
+	fake := vmexec.NewFake()
+	// Default fake: docker exec (tmux has-session) succeeds → session is ready.
+	if err := waitForSessionOrExit(context.Background(), fake, "c"); err != nil {
+		t.Fatalf("expected nil when session ready, got %v", err)
+	}
+}
+
+func TestWaitForSessionOrExit_ContainerExitedFailsFast(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetError("docker exec", "no session yet")                          // HasSession → false
+	fake.SetResponse("docker inspect --format {{.State.Running}}", "false") // not running
+	fake.SetResponse("docker inspect --format {{.State.ExitCode}}", "128")  // exited 128
+	fake.SetResponse("bash -lc docker logs",
+		"ssh: connect to host github.com port 22: Connection timed out")
+
+	err := waitForSessionOrExit(context.Background(), fake, "c")
+	if err == nil {
+		t.Fatal("expected error when container exited before session")
+	}
+	if !strings.Contains(err.Error(), "128") {
+		t.Errorf("error should report exit code 128, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "port 22") {
+		t.Errorf("error should surface the container logs, got %q", err.Error())
+	}
+}
+
 func TestResolveContainerName(t *testing.T) {
 	tests := []struct {
 		agentType string
@@ -93,6 +121,34 @@ func TestSpawnDryRunContainsSecurityFlags(t *testing.T) {
 	}
 }
 
+func TestPrepareSpawnResourceLimits_OmitsDefaultMemoryAndCPUsOnThreadedCgroup(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "threaded\n")
+	resolved := spawnResolved{Memory: "8g", CPUs: "4"}
+
+	err := prepareSpawnResourceLimits(context.Background(), fake, SpawnOpts{}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnResourceLimits() error = %v", err)
+	}
+	if resolved.Memory != "" || resolved.CPUs != "" {
+		t.Fatalf("expected memory/cpus omitted, got memory=%q cpus=%q", resolved.Memory, resolved.CPUs)
+	}
+}
+
+func TestPrepareSpawnResourceLimits_RejectsExplicitLimitsOnThreadedCgroup(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "threaded\n")
+	resolved := spawnResolved{Memory: "8g", CPUs: "4"}
+
+	err := prepareSpawnResourceLimits(context.Background(), fake, SpawnOpts{Memory: "8g"}, &resolved)
+	if err == nil {
+		t.Fatal("expected explicit memory limit to fail on threaded cgroup")
+	}
+	if !strings.Contains(err.Error(), "threaded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestStartSpawnContainerStartsDinDBeforeAgent(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("docker exec safe-agentic-docker-agent-claude-test docker info", "ok")
@@ -166,6 +222,88 @@ func TestExecuteSpawnWorktreeDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created worktree path or unexpected stat error: %v", err)
+	}
+}
+
+func TestExecuteSpawnWorktreeRejectsMaskedMacPath(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	repo := initSpawnGitRepo(t)
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+	defer os.Chdir(oldWD)
+	t.Setenv("HOME", "/Users/tester")
+
+	err = executeSpawn(SpawnOpts{
+		AgentType: "claude",
+		Name:      "masked-worktree",
+		Worktree:  true,
+		DryRun:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "hidden from the safe-agentic VM") {
+		t.Fatalf("executeSpawn() error = %v, want masked worktree path error", err)
+	}
+}
+
+func TestExecuteSpawnWorktreeRejectsMountOptionCharacters(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	repo := initSpawnGitRepo(t)
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+	defer os.Chdir(oldWD)
+
+	err = executeSpawn(SpawnOpts{
+		AgentType:    "claude",
+		Name:         "bad-worktree-path",
+		Worktree:     true,
+		WorktreePath: filepath.Join(t.TempDir(), "bad,path"),
+		DryRun:       true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Docker --mount cannot safely encode") {
+		t.Fatalf("executeSpawn() error = %v, want Docker mount path error", err)
+	}
+}
+
+func TestExecuteSpawnWorktreeChecksVMVisibilityBeforeCreate(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+	fake.SetError("test -f ", "not visible")
+
+	repo := initSpawnGitRepo(t)
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+	defer os.Chdir(oldWD)
+
+	worktreePath := filepath.Join(t.TempDir(), "agent-worktree")
+	err = executeSpawn(SpawnOpts{
+		AgentType:    "claude",
+		Name:         "invisible-worktree",
+		Worktree:     true,
+		WorktreePath: worktreePath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not visible inside VM") {
+		t.Fatalf("executeSpawn() error = %v, want VM visibility error", err)
+	}
+	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("worktree should not be created before visibility passes, stat err=%v", err)
 	}
 }
 

@@ -556,6 +556,19 @@ func TestServerHTTPHandlerRequiresBearerToken(t *testing.T) {
 	}
 }
 
+func TestValidateServerListenAddressRequiresLoopback(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"} {
+		if err := validateServerListenAddress(addr); err != nil {
+			t.Fatalf("validateServerListenAddress(%q) error = %v", addr, err)
+		}
+	}
+	for _, addr := range []string{":8765", "0.0.0.0:8765", "192.168.1.10:8765", "[::]:8765"} {
+		if err := validateServerListenAddress(addr); err == nil {
+			t.Fatalf("validateServerListenAddress(%q) got nil, want error", addr)
+		}
+	}
+}
+
 func TestBrowserRejectsUnsupportedMode(t *testing.T) {
 	oldMode := browserMode
 	browserMode = "bogus"
@@ -3279,6 +3292,44 @@ func TestDiagnoseCommand_DockerReady(t *testing.T) {
 	}
 }
 
+func TestDiagnoseCommand_WarnsRiskyDefaults(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	fake.SetResponse("docker info", "Server Version: 24.0\n")
+	fake.SetResponse("docker images safe-agentic:latest -q", "sha256:abc123\n")
+
+	configDir := filepath.Join(os.Getenv("HOME"), ".safe-ag")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(`version = 1
+
+[defaults]
+ssh = true
+reuse_auth = true
+reuse_gh_auth = true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	output := captureOutput(func() {
+		if err := runDiagnose(diagnoseCmd, nil); err != nil {
+			t.Fatalf("runDiagnose() error = %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Spawn defaults",
+		"! --ssh enabled by default",
+		"! --reuse-auth enabled by default",
+		"! --reuse-gh-auth enabled by default",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("diagnose output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 // ─── runSetup ─────────────────────────────────────────────────────────────────
 
 func TestSetupCommand_DockerAvailable(t *testing.T) {
@@ -3718,6 +3769,35 @@ func TestSpawnWithDockerSocket(t *testing.T) {
 	})
 	if !strings.Contains(output, "Would execute") {
 		t.Errorf("expected dry-run output, got: %s", output)
+	}
+}
+
+func TestSpawnDryRunPrintsRiskSummary(t *testing.T) {
+	_, cleanup := testSetup(t)
+	defer cleanup()
+
+	output := captureOutput(func() {
+		err := executeSpawn(SpawnOpts{
+			AgentType:   "claude",
+			SSH:         true,
+			ReuseAuth:   true,
+			ReuseGHAuth: true,
+			DryRun:      true,
+		})
+		if err != nil {
+			t.Fatalf("executeSpawn() error = %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Security context:",
+		"! --ssh:",
+		"! --reuse-auth:",
+		"! --reuse-gh-auth:",
+		"~/.safe-ag/rules.toml",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, output)
+		}
 	}
 }
 

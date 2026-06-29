@@ -281,6 +281,7 @@ Scopes are optional: `feat(tui):`, `fix(ci):`, etc.
 ## Known Limitations
 
 - Apple container machine hardening assumes the machine was created with `--home-mount none`. Re-harden on VM restart with `safe-ag vm start`.
+- VM internet egress relies on host pf NAT plus `net.inet.ip.forwarding=1`, applied during `safe-ag setup`. A macOS reboot resets forwarding and flushes the pf anchor, so the VM loses egress (clones time out, agents die on startup). `safe-ag vm start` now re-applies NAT, and `safe-ag diagnose` flags the missing egress.
 - `--dangerously-skip-permissions` lets Claude execute anything inside the container. With `--ssh`, this includes pushing to other repos.
 - Codex runs in yolo mode (`--yolo`) for the same reason: the container is the sandbox.
 - Build trusts upstream signing roots (apt GPG keys, npm registry). Direct-download binaries are pinned and checksum-verified.

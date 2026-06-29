@@ -45,6 +45,29 @@ func TestAppendSSHMount_FallbackDirect(t *testing.T) {
 	}
 }
 
+func TestAppendSSHMount_StartsRelayWithoutStartStopDaemon(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "/var/host-services/ssh-auth.sock")
+	fake.SetError("test -S", "not found") // relay socket doesn't exist
+	cmd := NewRunCmd("agent-claude-abc", "safe-agentic:latest")
+	err := AppendSSHMount(context.Background(), fake, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	setupCommands := fake.CommandsMatching("bash -lc set -e; install -d")
+	if len(setupCommands) != 1 {
+		t.Fatalf("expected one relay setup command, got %d: %v", len(setupCommands), setupCommands)
+	}
+	setup := strings.Join(setupCommands[0], " ")
+	if strings.Contains(setup, "start-stop-daemon") {
+		t.Fatalf("relay setup should not require start-stop-daemon: %s", setup)
+	}
+	if !strings.Contains(setup, "nohup") || !strings.Contains(setup, "socat") {
+		t.Fatalf("relay setup should launch socat in background: %s", setup)
+	}
+}
+
 func TestAppendSSHMount_EmptySocket(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("bash -c echo $SSH_AUTH_SOCK", "")

@@ -237,3 +237,25 @@ func TestSetValueRejectsBadTypes(t *testing.T) {
 		t.Fatal("expected bool parse error")
 	}
 }
+
+func TestSetValueRejectsInvalidDefaults(t *testing.T) {
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"defaults.cpus", "0"},
+		{"defaults.memory", "huge"},
+		{"defaults.pids_limit", "1"},
+		{"defaults.network", "host"},
+		{"defaults.network", "container:other"},
+		{"defaults.identity", "Agent Bot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			var raw FileConfig
+			if err := SetValue(&raw, tt.key, tt.value); err == nil {
+				t.Fatalf("SetValue(%q, %q) expected error", tt.key, tt.value)
+			}
+		})
+	}
+}

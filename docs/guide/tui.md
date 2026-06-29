@@ -67,4 +67,10 @@ Press `n` to open the spawn form. It lets you set:
 - Docker socket access
 - git identity
 
-The spawn form starts from `~/.safe-ag/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. The spawned agent is launched in background mode; reconnect from the table when ready.
+The spawn form starts from `~/.safe-ag/config.toml` defaults. Unchecking a default-enabled risky option emits the matching `--no-*` flag for that session. If the final spawn would enable SSH, shared auth, host auth seeding, AWS credentials, Docker, or Docker socket access, the footer asks for `y/n` confirmation before launch. The spawned agent is launched in background mode; reconnect from the table when ready.
+
+## File transfer
+
+Press `c` to transfer files between the selected agent and the Apple container VM.
+
+Agent paths are normalized and must stay under `/workspace`. This keeps the TUI transfer flow focused on repo artifacts instead of agent auth/config directories. VM paths must be absolute paths in the VM, for example `/tmp/report.txt`; relative paths and Docker `container:path` syntax are rejected.

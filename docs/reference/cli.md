@@ -81,6 +81,8 @@ safe-ag <command> <name>
 safe-ag <command> --latest
 ```
 
+`<name>` may be a full container name or a unique substring. Ambiguous substrings fail and print the matching container names.
+
 Commands in this family:
 - `attach`
 - `aws-refresh`
@@ -146,7 +148,7 @@ Flags:
 | `--ssh` | bool | enable SSH agent forwarding |
 | `--template` | string | prompt template name |
 | `--var` | strings | template variable assignment `key=value`; repeatable |
-| `--worktree` | bool | create and mount a managed host git worktree from the current checkout |
+| `--worktree` | bool | create and mount a managed git worktree from the current checkout |
 | `--worktree-branch` | string | branch name for `--worktree` |
 | `--worktree-include` | string | include file for ignored local files; default `.safe-aginclude` |
 | `--worktree-path` | string | destination path for `--worktree` |
@@ -158,6 +160,8 @@ safe-ag spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
 ```
 
 `--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `safe-ag/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.safe-aginclude`.
+
+The worktree path must also be visible inside the Apple container machine. Hardened macOS machines mask `/Users`, `/Volumes`, `/private`, and `/mnt/mac`, so the default macOS home path is rejected before launch instead of failing later in Docker.
 
 Spawn policy:
 
@@ -313,7 +317,7 @@ safe-ag server --stdio
 SAFE_AGENTIC_SERVER_TOKEN=secret safe-ag server --listen 127.0.0.1:8765
 ```
 
-Reads newline-delimited JSON requests from stdin and writes JSON responses to stdout. With `--listen`, accepts authenticated `POST /rpc` requests with `Authorization: Bearer <token>`.
+Reads newline-delimited JSON requests from stdin and writes JSON responses to stdout. With `--listen`, accepts authenticated `POST /rpc` requests with `Authorization: Bearer <token>`. HTTP listen addresses must be loopback-only (`localhost`, `127.0.0.1`, or `::1`).
 
 Methods: `schema`, `ping`, `timeline`, `inbox`, `agents.list`, `agent.logs`, `agent.diff`, `actions.list`, and `actions.run`.
 
@@ -983,6 +987,8 @@ safe-ag diagnose
 ```
 
 No command-specific flags beyond `--help`.
+
+`diagnose` also prints the effective spawn defaults from `~/.safe-ag/config.toml` and warns when defaults widen the sandbox, such as default SSH forwarding, shared auth, Docker access, setup hooks, or custom networking.
 
 ## `cleanup`
 

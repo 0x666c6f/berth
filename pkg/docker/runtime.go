@@ -63,9 +63,13 @@ func (d *DockerRunCmd) AddFlag(flags ...string) {
 }
 func (d *DockerRunCmd) AddCmdArgs(args ...string) { d.cmdArgs = append(d.cmdArgs, args...) }
 func (d *DockerRunCmd) AddNamedVolume(src, dst string) {
+	mustSafeMountValue("volume source", src)
+	mustSafeMountValue("mount destination", dst)
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", src, dst))
 }
 func (d *DockerRunCmd) AddBindMount(src, dst string, readonly bool) {
+	mustSafeMountValue("bind source", src)
+	mustSafeMountValue("mount destination", dst)
 	mount := fmt.Sprintf("type=bind,src=%s,dst=%s", src, dst)
 	if readonly {
 		mount += ",readonly"
@@ -73,6 +77,7 @@ func (d *DockerRunCmd) AddBindMount(src, dst string, readonly bool) {
 	d.mounts = append(d.mounts, "--mount", mount)
 }
 func (d *DockerRunCmd) AddEphemeralVolume(dst string) {
+	mustSafeMountValue("mount destination", dst)
 	d.mounts = append(d.mounts, "--mount", fmt.Sprintf("type=volume,dst=%s", dst))
 }
 func (d *DockerRunCmd) AddTmpfs(path, size string, noexec, nosuid bool) {
@@ -85,6 +90,8 @@ func (d *DockerRunCmd) AddTmpfsOwned(path, size string, noexec, nosuid bool, uid
 }
 
 func (d *DockerRunCmd) addTmpfs(path, size string, noexec, nosuid bool, uid, gid int) {
+	mustSafeMountValue("tmpfs path", path)
+	mustSafeMountValue("tmpfs size", size)
 	opts := "rw"
 	if noexec {
 		opts += ",noexec"
@@ -102,6 +109,15 @@ func (d *DockerRunCmd) addTmpfs(path, size string, noexec, nosuid bool, uid, gid
 		opts += fmt.Sprintf(",gid=%d", gid)
 	}
 	d.tmpfs = append(d.tmpfs, fmt.Sprintf("%s:%s", path, opts))
+}
+
+func mustSafeMountValue(field, value string) {
+	if value == "" {
+		return
+	}
+	if strings.ContainsAny(value, ",\n\r\x00") {
+		panic(fmt.Sprintf("unsafe docker mount %s: %q", field, value))
+	}
 }
 
 // Build produces the final []string for exec.Command.

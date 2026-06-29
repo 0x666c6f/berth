@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -82,6 +83,9 @@ func init() {
 
 func runServer(cmd *cobra.Command, args []string) error {
 	if serverListen != "" {
+		if err := validateServerListenAddress(serverListen); err != nil {
+			return err
+		}
 		token := serverToken
 		if token == "" {
 			token = os.Getenv("SAFE_AGENTIC_SERVER_TOKEN")
@@ -103,6 +107,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("set --stdio or --listen")
 	}
 	return serveJSON(os.Stdin, os.Stdout)
+}
+
+func validateServerListenAddress(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid --listen address %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("--listen must bind to localhost or a loopback IP, got %q", addr)
+	}
+	return nil
 }
 
 func serveJSON(r io.Reader, w io.Writer) error {

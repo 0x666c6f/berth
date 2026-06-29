@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/0x666c6f/safe-agentic/pkg/validate"
 	"github.com/BurntSushi/toml"
 )
 
@@ -393,13 +394,24 @@ func SetValue(raw *FileConfig, key, value string) error {
 	}
 	switch canonical {
 	case "defaults.cpus":
+		if err := validate.CPUs(value); err != nil {
+			return err
+		}
 		raw.ensureDefaults().CPUs = stringPtr(value)
 	case "defaults.memory":
+		if err := validate.MemoryLimit(value); err != nil {
+			return err
+		}
 		raw.ensureDefaults().Memory = stringPtr(value)
 	case "defaults.pids_limit":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("invalid integer for %s: %w", canonical, err)
+		}
+		if parsed != 0 {
+			if err := validate.PIDsLimit(parsed); err != nil {
+				return err
+			}
 		}
 		raw.ensureDefaults().PIDsLimit = intPtr(parsed)
 	case "defaults.ssh":
@@ -415,8 +427,14 @@ func SetValue(raw *FileConfig, key, value string) error {
 	case "defaults.seed_auth":
 		return setBool(&raw.ensureDefaults().SeedAuth, canonical, value)
 	case "defaults.network":
+		if err := validate.NetworkName(value); err != nil {
+			return err
+		}
 		raw.ensureDefaults().Network = stringPtr(value)
 	case "defaults.identity":
+		if _, _, err := ParseIdentity(value); err != nil {
+			return err
+		}
 		raw.ensureDefaults().Identity = stringPtr(value)
 	case "git.author_name":
 		raw.ensureGit().AuthorName = stringPtr(value)

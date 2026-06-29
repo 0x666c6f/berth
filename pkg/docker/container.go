@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
+	"strconv"
 	"strings"
 )
 
@@ -42,18 +43,28 @@ func ResolveTarget(ctx context.Context, exec vmexec.Executor, nameOrPartial stri
 	if err != nil {
 		return "", fmt.Errorf("list containers: %w", err)
 	}
-	names := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if n == nameOrPartial {
-			return n, nil
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+		if name == nameOrPartial {
+			return name, nil
 		}
 	}
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if strings.Contains(n, nameOrPartial) {
-			return n, nil
+	var matches []string
+	for _, name := range names {
+		if strings.Contains(name, nameOrPartial) {
+			matches = append(matches, name)
 		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("container %q is ambiguous; matches: %s", nameOrPartial, strings.Join(matches, ", "))
 	}
 	return "", fmt.Errorf("container %q not found", nameOrPartial)
 }
@@ -74,4 +85,31 @@ func IsRunning(ctx context.Context, exec vmexec.Executor, name string) (bool, er
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+// ExitCode returns the container's last exit code. A running container reports 0.
+func ExitCode(ctx context.Context, exec vmexec.Executor, name string) (int, error) {
+	out, err := exec.Run(ctx, "docker", "inspect",
+		"--format", "{{.State.ExitCode}}", name)
+	if err != nil {
+		return 0, err
+	}
+	raw := strings.TrimSpace(string(out))
+	code, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse exit code %q: %w", raw, err)
+	}
+	return code, nil
+}
+
+// TailLogs returns the last n lines of the container's combined stdout+stderr.
+// The container name is passed as a positional argument ($1) rather than
+// interpolated into the script so it cannot be used for shell injection.
+func TailLogs(ctx context.Context, exec vmexec.Executor, name string, n int) (string, error) {
+	out, err := exec.Run(ctx, "bash", "-lc",
+		"docker logs --tail "+strconv.Itoa(n)+" \"$1\" 2>&1", "bash", name)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

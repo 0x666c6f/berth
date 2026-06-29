@@ -79,6 +79,18 @@ func TestResolveTarget_PartialMatch(t *testing.T) {
 	}
 }
 
+func TestResolveTarget_AmbiguousPartialMatch(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}}", "agent-claude-abc\nagent-codex-abc")
+	_, err := ResolveTarget(context.Background(), fake, "abc")
+	if err == nil {
+		t.Fatal("expected ambiguous partial error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "agent-claude-abc") || !strings.Contains(err.Error(), "agent-codex-abc") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveTarget_Latest(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a --filter name=^agent- --format {{.Names}} --latest", "agent-claude-latest")
@@ -169,5 +181,46 @@ func TestIsRunning_Error(t *testing.T) {
 	}
 	if running {
 		t.Fatal("should not be running on error")
+	}
+}
+
+func TestExitCode_Parsed(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker inspect --format {{.State.ExitCode}}", "128\n")
+	code, err := ExitCode(context.Background(), fake, "mycontainer")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 128 {
+		t.Errorf("expected exit code 128, got %d", code)
+	}
+}
+
+func TestExitCode_NonNumeric(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker inspect --format {{.State.ExitCode}}", "oops")
+	if _, err := ExitCode(context.Background(), fake, "mycontainer"); err == nil {
+		t.Fatal("expected error on non-numeric exit code")
+	}
+}
+
+func TestTailLogs_ReturnsTrimmedOutput(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -lc docker logs", "ssh: connect to host github.com port 22: Connection timed out\n")
+	logs, err := TailLogs(context.Background(), fake, "mycontainer", 20)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if logs != "ssh: connect to host github.com port 22: Connection timed out" {
+		t.Errorf("unexpected logs: %q", logs)
+	}
+	// Container name must be passed as a positional arg, not interpolated.
+	cmds := fake.CommandsMatching("docker logs")
+	if len(cmds) != 1 {
+		t.Fatalf("expected one docker logs call, got %d", len(cmds))
+	}
+	last := cmds[0]
+	if last[len(last)-1] != "mycontainer" {
+		t.Errorf("expected container name as trailing positional arg, got %v", last)
 	}
 }

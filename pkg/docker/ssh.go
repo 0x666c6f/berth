@@ -43,15 +43,15 @@ func AppendSSHMount(ctx context.Context, exec vmexec.Executor, cmd *DockerRunCmd
 	if relayExists != nil {
 		lockedScript := fmt.Sprintf(
 			"if [ -S %s ]; then exit 0; fi; rm -f %s %s; "+
-				"start-stop-daemon --start --background --make-pidfile --pidfile %s "+
-				"--exec \"$(command -v socat)\" -- "+
-				"UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s",
+				"socat_path=\"$(command -v socat)\"; "+
+				"nohup \"$socat_path\" UNIX-LISTEN:%s,fork,mode=666 UNIX-CONNECT:%s >/dev/null 2>&1 & "+
+				"echo $! > %s",
 			shellQuote(sshRelaySocket),
 			shellQuote(sshRelaySocket),
-			shellQuote(sshRelayPIDFile),
 			shellQuote(sshRelayPIDFile),
 			shellQuote(sshRelaySocket),
 			shellQuote(vmSocket),
+			shellQuote(sshRelayPIDFile),
 		)
 		setupCmd := fmt.Sprintf(
 			"set -e; install -d -m 700 %s; flock %s bash -lc %s",

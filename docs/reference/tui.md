@@ -210,6 +210,8 @@ Current fields:
 | `VM source (push):` | source path in the VM environment for push |
 | `Agent path (push dest):` | destination path in the container for push |
 
+Agent paths are normalized and must stay under `/workspace`. VM paths are normalized absolute paths inside the Apple container VM; relative paths and Docker `container:path` syntax are rejected.
+
 ## Table sorting and filtering
 
 Sorting:

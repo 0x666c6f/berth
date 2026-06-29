@@ -10,9 +10,11 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:   "safe-ag",
-	Short: "Isolated environment for running AI coding agents",
-	Long:  "Sandboxed AI agent environment with per-agent Docker containers in an Apple container machine.",
+	Use:           "safe-ag",
+	Short:         "Isolated environment for running AI coding agents",
+	Long:          "Sandboxed AI agent environment with per-agent Docker containers in an Apple container machine.",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0x666c6f/safe-agentic/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -625,6 +626,15 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Println("✓ VM support files installed")
+	// A reboot resets net.inet.ip.forwarding and flushes the pf NAT anchor, so
+	// the VM loses internet egress until NAT is re-applied. Restoring it here
+	// means restarting the VM is enough to recover; otherwise every clone times
+	// out and agents die on startup.
+	fmt.Println("Restoring host network egress (NAT)…")
+	if err := configureHostNAT(cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		return fmt.Errorf("restore host NAT: %w", err)
+	}
+	fmt.Println("✓ Host NAT applied")
 	return nil
 }
 
@@ -740,12 +750,48 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	}
 	check("Docker image safe-agentic:latest", imageExists, imageDetail)
 
-	fmt.Println()
-	if containerErr == nil && systemErr == nil && vmExists && dockerErr == nil && imageExists {
-		fmt.Println("All checks passed. Environment is ready.")
+	// 5. Check host egress NAT. A reboot resets net.inet.ip.forwarding to 0 and
+	// flushes the pf anchor, leaving the VM unable to reach the internet (clones
+	// time out, agents die on startup). This is the most common silent breakage.
+	forwarding := hostIPForwardingEnabled()
+	egressDetail := ""
+	if !forwarding {
+		egressDetail = "IP forwarding off — VM has no internet egress; run: safe-ag vm start"
+	}
+	check("Host egress NAT (ip.forwarding)", forwarding, egressDetail)
+
+	cfg, cfgErr := config.LoadDefaults(config.DefaultsPath())
+	if cfgErr != nil {
+		fmt.Println()
+		fmt.Printf("Spawn defaults\n  ! could not read %s: %v\n", config.DefaultsPath(), cfgErr)
 	} else {
+		printDiagnoseSpawnDefaults(os.Stdout, cfg, config.DefaultsPath())
+	}
+
+	fmt.Println()
+	infraOK := containerErr == nil && systemErr == nil && vmExists && dockerErr == nil && imageExists
+	switch {
+	case infraOK && cfgErr == nil && forwarding:
+		fmt.Println("All checks passed. Environment is ready.")
+	case infraOK && cfgErr == nil && !forwarding:
+		fmt.Println("Environment built but VM has no internet egress. Run: safe-ag vm start")
+	case infraOK && cfgErr != nil:
+		// executeSpawn aborts on this same config error, so the environment is
+		// not actually usable even though the infra checks pass.
+		fmt.Printf("Spawn defaults are unreadable (%s); fix or reset with: safe-ag config reset\n", config.DefaultsPath())
+	default:
 		fmt.Println("Some checks failed. Run: safe-ag setup")
 	}
 
 	return nil
+}
+
+// hostIPForwardingEnabled reports whether the macOS host is forwarding IP,
+// a prerequisite for the pf NAT that gives the VM internet egress.
+func hostIPForwardingEnabled() bool {
+	out, err := exec.Command("/usr/sbin/sysctl", "-n", "net.inet.ip.forwarding").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "1"
 }
