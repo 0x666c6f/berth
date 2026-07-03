@@ -8,9 +8,12 @@ Owner: florian (personal power tool)
 
 safe-agentic has a deep engine (isolated per-agent containers in an Apple VM, fleet/pipeline
 orchestration, cost/budget kill, audit, checkpoints, replay) but only a terminal TUI as frontend.
-Supacode (v0.10.5, benchmarked 2026-07-03 from the installed app) proves the desktop UX pattern
-for agent orchestration: embedded terminals, presence badges, "needs-you" state, rich
-notifications carrying the agent's last message, menubar counts, command palette.
+Supacode (v0.10.5, benchmarked 2026-07-03 from the installed app + public docs/changelog)
+proves the desktop UX pattern for agent orchestration: embedded terminals, presence badges,
+"needs-you" state, rich notifications carrying the agent's last message, command palette.
+Supacode is free and open source (github.com/supabitapp/supacode, native Swift + libghostty)
+— its source is a usable reference for UX/implementation patterns (agent presence via
+OSC 3008, zmx session persistence, hook auto-install) even though our stack differs.
 
 Gap analysis conclusion: Supacode is a thin UX layer over host-run (unisolated) agents;
 safe-agentic is a deep engine with no GUI. This app puts a Supacode-grade front on the
