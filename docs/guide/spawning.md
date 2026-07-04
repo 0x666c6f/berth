@@ -124,10 +124,17 @@ Rules:
 - default branch is `safe-ag/<container-name>`
 - ignored local files listed in `.safe-aginclude` are copied into the worktree
 
-Important limitation:
-- the worktree path must be visible inside the Apple container machine
-- hardened macOS machines mask `/Users`, `/Volumes`, `/private`, and `/mnt/mac`
-- on that default hardened setup, prefer `--repo` for the agent run and `handoff --to-local` when you need to inspect or keep the result locally
+`--worktree` is opt-in (off by default):
+- enable it once with `safe-ag setup --enable-worktrees` (or `safe-ag config set defaults.worktrees_mount true` then `safe-ag setup`); disable with `safe-ag setup --disable-worktrees`
+- when enabled, the machine runs `home-mount=rw` and `vm/setup.sh` binds *only* the worktrees root (`~/.safe-ag/worktrees`, or `defaults.worktrees_dir`) to a stable `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`
+- on spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the container bind
+- a `--worktree-path` outside the worktrees root is rejected before launch; the root must live under your home directory
+- `safe-ag setup`/`safe-ag vm start` reconcile the machine to match the config; `safe-ag diagnose` reports the posture
+
+Security trade-off:
+- the default (`home-mount=none`) shares no host data with the VM; enabling the worktree mount switches to `home-mount=rw`, which shares your whole home at the virtiofs level
+- safe-agentic detaches and masks everything except the worktrees root, but this is a **weaker boundary** than the default — a VM-root compromise or Docker escape could re-reach host home
+- keep secrets and unrelated projects out of the worktrees root; see the [threat model](../security/threat-model.md)
 
 Handoff:
 

@@ -193,7 +193,7 @@ Repo-local skills currently cover:
 
 ## Known Limitations
 
-- Apple container machine hardening assumes `--home-mount none`; re-harden on VM restart with `safe-ag vm start`.
+- Default posture is `home-mount=none` — the host home is never shared with the VM. Apple `container` cannot mount a single host directory into a machine, so `--worktree` is opt-in: `safe-ag setup --enable-worktrees` switches the machine to `home-mount=rw`, and `vm/setup.sh` binds only the worktrees root to `/worktrees`, detaches the rest of the home share, then masks `/Users`, `/Volumes`, `/private`, `/mnt/mac`. Enabling this weakens the VM boundary (rw home share); keep secrets out of the worktrees root. `safe-ag diagnose` reports the posture; `safe-ag setup`/`safe-ag vm start` reconcile in either direction. Worktree paths outside the root are rejected. See `docs/security/threat-model.md`.
 - Claude `--dangerously-skip-permissions` and Codex `--yolo` are acceptable here because the container is the sandbox; with `--ssh`, pushes stay possible.
 - Build still trusts upstream signing roots for package ecosystems; direct downloads are pinned and checksum-verified.
 

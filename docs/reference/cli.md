@@ -60,6 +60,7 @@ Top-level commands:
 | `sessions` | export session data |
 | `setup` | initialize VM and build the image |
 | `spawn` | start a new agent container |
+| `status` | show live agent state (blocked/working/done/idle/exited) |
 | `steer` | send a follow-up message into an agent tmux session |
 | `stop` | stop agent containers |
 | `summary` | show a compact agent summary |
@@ -96,6 +97,7 @@ Commands in this family:
 - `retry`
 - `review`
 - `sessions`
+- `status`
 - `stop`
 - `summary`
 - most `checkpoint` and `todo` subcommands
@@ -135,7 +137,7 @@ Flags:
 | `--no-seed-auth` | bool | disable default host auth seeding |
 | `--no-ssh` | bool | disable default SSH agent forwarding |
 | `--network` | string | custom Docker network |
-| `--notify` | string | notification target string |
+| `--notify` | string | notification targets, comma-separated (see [Notify targets](#notify-targets)) |
 | `--on-complete` | string | command to run on success |
 | `--on-exit` | string | command to run on exit |
 | `--on-fail` | string | command to run on failure |
@@ -161,7 +163,17 @@ safe-ag spawn claude --worktree --name auth-fix --prompt "Fix auth tests"
 
 `--worktree` must run from inside a git checkout and cannot be combined with `--repo`. It creates a branch under `safe-ag/<container>` by default, bind-mounts that checkout at `/workspace`, and copies ignored local files listed in `.safe-aginclude`.
 
-The worktree path must also be visible inside the Apple container machine. Hardened macOS machines mask `/Users`, `/Volumes`, `/private`, and `/mnt/mac`, so the default macOS home path is rejected before launch instead of failing later in Docker.
+**`--worktree` is opt-in and off by default.** Apple's `container` cannot mount an arbitrary host directory into a machine — the only host share is `--home-mount ro|rw|none`, and safe-agentic defaults to `none` (nothing shared, strongest isolation). To use `--worktree` you must enable the worktree mount:
+
+```bash
+safe-ag setup --enable-worktrees      # or: safe-ag config set defaults.worktrees_mount true && safe-ag setup
+```
+
+This switches the machine to `home-mount=rw` and, via `vm/setup.sh`, binds *only* the worktrees root — `~/.safe-ag/worktrees` by default, or `defaults.worktrees_dir` (must be under your home) — to a stable `/worktrees`, then **detaches** the rest of the home share and tmpfs-masks `/Users`, `/Volumes`, `/private`, and `/mnt/mac`. On spawn, the host worktree path is translated to its in-VM `/worktrees/...` path for the Docker bind. A `--worktree-path` outside the worktrees root is rejected before launch.
+
+Disable again with `safe-ag setup --disable-worktrees` (restores `home-mount=none`). `safe-ag setup` and `safe-ag vm start` reconcile the machine to match the config in either direction; `safe-ag diagnose` reports the current posture.
+
+**Security trade-off:** enabling the worktree mount **weakens the VM boundary**. `home-mount=rw` shares your whole home with the machine at the virtiofs level; safe-agentic detaches and masks everything except the worktrees root, but a VM-root compromise or Docker escape could re-reach host home — the default `home-mount=none` shares nothing and cannot. Keep secrets and unrelated projects out of the worktrees root. See [Threat model](../security/threat-model.md).
 
 Spawn policy:
 
@@ -179,6 +191,32 @@ setup_scripts = false
 ```
 
 Policy is enforced after config defaults are applied and before network/container creation. User and nearest project rules both apply; any deny blocks the spawn. Omitted keys are unrestricted.
+
+### Notify targets
+
+`--notify` takes a comma-separated list of targets. The whole string is
+persisted (base64) on the container and reconstructed for later delivery.
+
+| Target | Form | Delivery |
+|---|---|---|
+| `terminal` | `terminal` | print to the terminal |
+| `slack` | `slack:<webhook-url>` | POST to a Slack incoming webhook |
+| `command` | `command:<path>` | run an executable with the event |
+| `system` | `system` | native macOS notification |
+
+The `system` target posts a macOS notification titled `safe-ag: <container>`
+via `terminal-notifier` when it is on `PATH`, otherwise via
+`osascript -e 'display notification …'`. The sound conveys severity:
+attention-worthy events (`blocked`, `failed`, `needs-auth`, `stuck`) play a
+harsh sound (`Basso`); successful ones (`ready-for-review`, `ready-for-pr`,
+`done`) play a soft sound (`Glass`); everything else is silent. On non-macOS
+hosts the `system` target is a no-op.
+
+Example:
+
+```bash
+safe-ag spawn claude --notify terminal,system --repo git@github.com:org/repo.git
+```
 
 ## `run`
 
@@ -221,11 +259,20 @@ Usage:
 safe-ag list [flags]
 ```
 
+The human-readable output includes a **STATE** column next to each agent —
+the same `agentstate` classification used by `safe-ag status` and the TUI
+(`blocked` / `working` / `done` / `idle` / `exited`). Running tmux agents are
+detected from their live pane; stopped containers map to `done` (clean exit) or
+`exited` (non-zero) by exit code.
+
 Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
 | `--json` | bool | output raw JSON-like line format from Docker listing |
+
+With `--json`, each Docker line gains an added `"state"` field. All existing
+Docker fields are preserved unchanged, so the output stays backward compatible.
 
 ## `action`
 
@@ -350,6 +397,24 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--latest` | bool | target the latest container |
+| `--resume` | bool | continue the agent's previous conversation instead of starting a fresh session |
+
+With `--resume`, the agent continues in continue mode (`claude --continue` /
+`codex resume --last`) rather than a fresh prompt. If the container is still
+running with a live session, `attach --resume` simply reconnects to the ongoing
+conversation. If it exited, the container is restarted and the entrypoint
+resumes automatically. If it is running but has no attachable tmux session,
+`attach --resume` **refuses** rather than relaunch — a headless agent (e.g.
+`--background`) may still be alive, and starting a second agent against the same
+workspace and auth volume would be unsafe; use `safe-ag steer` to send input, or
+`safe-ag stop` then `attach --resume` to restart. Resume works only when the
+conversation transcript survived: it lives under `~/.claude` / `~/.codex`, so a
+session that used `--ephemeral-auth` (tmpfs) loses its transcript once the
+container stops — on a stopped ephemeral container `attach --resume` **refuses**
+(restarting would auto-continue against an empty auth dir and error), so use
+plain `safe-ag attach <name>` or `safe-ag retry` for a fresh run. Use
+`--reuse-auth` (a persistent named volume) if you want conversations to survive
+stops. `--resume` supports claude and codex agents only.
 
 ## `steer`
 
@@ -398,6 +463,35 @@ Flags:
 | `--latest` | bool | target the latest container |
 | `--lines` | int | number of log entries; default `50` |
 
+## `status`
+
+Reports the live state of an agent inferred from its tmux pane: `blocked`
+(waiting on a permission / trust / approval prompt or an interactive login),
+`working` (actively streaming), `idle` (sitting at an empty prompt), `done`
+(stopped, exit 0), `exited` (stopped, non-zero), or `unknown`. Detection is
+deliberately conservative about `blocked` — a false positive is worse than a
+miss — so ambiguous panes resolve to `working` or `unknown` rather than
+`blocked`.
+
+Usage:
+
+```bash
+safe-ag status [name|--latest] [flags]
+safe-ag status --all
+safe-ag status agent-foo --json
+```
+
+Flags:
+
+| Flag | Type | Meaning |
+|---|---|---|
+| `--all` | bool | show every safe-agentic container |
+| `--json` | bool | output as JSON |
+| `--latest` | bool | target the latest container |
+
+A blocked agent also surfaces in [`inbox`](#inbox) as a needs-attention item,
+and can drive the [`system` notify target](#notify-targets).
+
 ## `summary`
 
 Usage:
@@ -411,6 +505,9 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--latest` | bool | target the latest container |
+
+The summary includes a `State:` line with the same detection used by
+[`status`](#status).
 
 ## `output`
 
@@ -443,6 +540,9 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--stat` | bool | show diffstat only |
+| `--side-by-side`, `-s` | bool | render the diff side-by-side with `delta` (baked into the agent image) |
+
+`--stat` and `--side-by-side` are mutually exclusive. `--side-by-side` sizes delta's columns to the host terminal width (falls back to `$COLUMNS`, then 160). If `delta` is missing from an older agent image, it prints a one-line warning to stderr and falls back to a plain diff.
 
 ## `review`
 
@@ -457,6 +557,8 @@ Flags:
 | Flag | Type | Meaning |
 |---|---|---|
 | `--base` | string | base branch for diff; default `main` |
+
+The review prompt requires every finding to carry a risk tag (`[HIGH]`, `[MEDIUM]`, or `[LOW]`) with a `file:line` location, and a closing `VERDICT:` line. After the raw review text, `safe-ag review` prints a grouped HIGH → LOW summary (untagged findings are kept under `UNTAGGED`, never dropped) followed by the verdict.
 
 ## `review-comments`
 
@@ -542,7 +644,7 @@ safe-ag inbox
 safe-ag inbox --all
 ```
 
-Shows events likely to need attention, such as failed cron jobs or entries marked `needs-auth`, `stuck`, `failed-tests`, `ready-for-review`, or `ready-for-pr`.
+Shows events likely to need attention, such as failed cron jobs or entries marked `needs-auth`, `blocked`, `stuck`, `failed-tests`, `ready-for-review`, or `ready-for-pr`. In addition to logged events, `inbox` sweeps running agents live and adds a `blocked` item for any agent currently waiting on a prompt.
 
 Flags:
 
@@ -577,7 +679,22 @@ Flags:
 
 | Flag | Type | Meaning |
 |---|---|---|
-| `--feedback` | string | additional guidance appended to the retry prompt |
+| `--feedback` | string | additional guidance appended to the retry prompt (or, with `--resume`, sent as a follow-up message) |
+| `--resume` | bool | continue the source conversation instead of re-running the original prompt |
+
+By default `retry` reconstructs the original spawn options into a fresh
+container and re-injects the prompt. With `--resume`, it instead reuses the
+source container's exact session/auth volume by restarting that container in
+continue mode, so the prior conversation is preserved. When combined with
+`--feedback`, the feedback text is delivered as a follow-up message through the
+same input path as `steer` (rather than appended to the prompt). If the source
+session used `--ephemeral-auth`, its transcript did not survive the stop and
+`retry --resume` fails with an actionable error — retry without `--resume` for a
+fresh attempt, or re-run the task with `--reuse-auth` so future sessions
+persist. If the source container is still running but has no live tmux session
+(a headless agent may still be active), `retry --resume` refuses rather than
+risk a second agent — use `safe-ag steer`, or `safe-ag stop` it first.
+`--resume` supports claude and codex agents only.
 
 ## `replay`
 
@@ -754,6 +871,87 @@ Flags:
 | `--var` | strings | manifest variable assignment `key=value`; repeatable |
 
 Saved user pipelines live in `~/.safe-ag/pipelines/`. Built-in review presets ship under the same catalog surface.
+
+### Judge stages (best-of-N "crown")
+
+A pipeline stage can select the single best result among two or more candidate
+runs instead of spawning an agent of its own. Add a `judge` block to a step
+(flat form) or stage (stages form). The judge depends on the candidate stages,
+collects each candidate container's working-tree diff and final message, runs a
+one-shot Claude judge to pick a winner, and records a strict-JSON verdict.
+
+```yaml
+name: judge-fanout
+defaults:
+  repo: ${repo}
+  ssh: true
+  reuse_auth: true
+  auto_trust: true
+steps:
+  - name: implement            # fan out across engines → 2 candidates
+    models: [claude, codex]
+    prompt: "${task}\n\nYou are candidate ${model}. Commit focused, tested changes."
+  - name: pick-winner
+    judge:
+      criteria: "correctness and tests first, then minimal diff"  # optional
+      auto_pr: true                                               # optional (default false)
+      base: main                                                  # optional PR base (default main)
+    depends_on: implement
+```
+
+Judge block fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `criteria` | string | optional free-text ranking guidance; a quality-first default is used when empty |
+| `auto_pr` | bool | when true, open a GitHub PR from the winning container (default false) |
+| `base` | string | PR base branch used with `auto_pr` (default `main`) |
+| `max_diff` | int | per-candidate diff byte cap embedded in the judge prompt (default 12000; truncation is noted inline) |
+
+Rules (validated at parse time):
+
+- A judge stage must `depends_on` stages that collectively produce **at least
+  two** candidate runs. Fan out either with `models: [...]` on the parent step/
+  stage, or with two or more `agents:` in a single candidate stage.
+- A judge stage/step must **not** carry `prompt`, `template`, `repo`, `type`,
+  `instructions`, `profile`, `models`, or `agents` of its own.
+- A judge cannot depend on a sub-pipeline stage or on another judge stage.
+
+Notes on candidate fan-out: `models: [...]` expands one step/stage into one
+candidate container **per entry**, and each entry becomes that candidate's agent
+`type` — so today the practical values are the agent engines `claude` and
+`codex` (per-model selection like `opus`/`sonnet` is future work). A single
+stage listing two or more `agents:` is the other way to reach ≥2 candidates.
+
+The judge agent is instructed to emit exactly:
+
+```json
+{"winner":"<container-name>","reason":"...","summary":"<PR-style summary of the winning change>"}
+```
+
+The verdict is parsed leniently (the first well-formed JSON object whose
+`winner` is a real candidate wins), printed at pipeline end, and persisted to
+`~/.safe-ag/state/judge/<pipeline>-<stage>-<timestamp>.json`. If the judge
+produces no usable verdict, the stage fails and the raw judge output is saved to
+that same file for inspection.
+
+With `auto_pr: true`, safe-ag opens a PR from the winning candidate. The winner
+container has already exited by then; safe-ag does **not** restart it (that would
+re-run its agent and could mutate the workspace). Instead it launches a
+short-lived helper container that mounts the winner's volumes with
+`--volumes-from` (carrying `/workspace` and the gh auth volume) but overrides the
+entrypoint. The helper creates a dedicated head branch
+(`safe-ag/judge-<pipeline>-<stage>-<timestamp>`) from the candidate's committed
+work — never the cloned default branch — pushes it, and opens the PR (base
+`base`, body = the judge summary with the reason appended).
+
+Because SSH-agent auth is per-container and cannot reach the helper, **`auto_pr`
+requires the winning candidate to have GitHub HTTPS auth** — spawn candidates
+with `reuse_gh_auth: true`. Candidates that can only push over SSH will fail the
+push, and the helper surfaces a clear error. A PR failure is always reported as a
+warning without discarding the verdict.
+
+See `examples/pipeline-judge-fanout.yaml` for a complete runnable manifest.
 
 ## `config`
 

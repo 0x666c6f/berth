@@ -6,6 +6,7 @@ This page is about container lifecycle after a session has been spawned.
 
 ```bash
 safe-ag list
+safe-ag status --all
 safe-ag peek --latest
 safe-ag logs --latest
 safe-ag search "error text"
@@ -19,6 +20,7 @@ safe-ag inbox
 
 Use:
 - `list` for all containers
+- `status` for the live state of an agent (blocked / working / done / idle / exited)
 - `peek` for quick live output
 - `logs` for the session log
 - `search` for finding prior output across agent session logs
@@ -27,7 +29,7 @@ Use:
 - `diff` for the workspace diff
 - `review-comments` for saved local file/line notes
 - `timeline` for recent event/audit history
-- `inbox` for failures or status markers that need attention
+- `inbox` for failures or status markers that need attention (including agents blocked on a prompt)
 
 ## Attach and resume
 

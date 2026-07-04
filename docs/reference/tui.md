@@ -58,6 +58,7 @@ Current columns:
 | `GH-AUTH` | GitHub auth mode |
 | `DOCKER` | Docker mode |
 | `NETWORK` | network mode |
+| `STATE` | agent state: `blocked`/`working`/`done`/`idle`/`exited` (see below) |
 | `STATUS` | container status |
 | `ACTIVITY` | working/idle/stopped or deleting spinner |
 | `CPU` | CPU usage |
@@ -70,6 +71,32 @@ Behavior:
 - selection is restored by agent name across refreshes
 - columns are hidden automatically on narrow terminals
 - deleting agents get transient overlay state
+
+### STATE column
+
+The `STATE` column is the same `agentstate` detection used by `safe-ag status`.
+The poller captures each running tmux agent's pane once per cycle and classifies
+it; stopped containers resolve to `done` (clean exit) or `exited` (non-zero).
+
+Colors: `blocked` is bold red (needs a human), `working` cyan, `done` green,
+`idle` dim, `exited` orange-red.
+
+The **default sort is a priority sort on STATE** — "which agent needs me first":
+`blocked` > `done` > `exited` > `working` > `idle`, stable within each state group
+and within fleet/pipeline groups. Pressing a number key switches to a normal
+column sort; press `9` to sort by STATE explicitly (toggles ascending/descending).
+
+### State-change notifications
+
+On macOS, when a poll observes an agent transitioning **into** `blocked`,
+`done`, or `exited`, the TUI fires a native desktop notification (attention sound
+for blocked/exited, success chime for done). Notifications are debounced per
+container: the first observation of each agent seeds its state silently, so
+neither startup nor a freshly spawned agent produces a burst, and a state only
+notifies once per transition.
+
+Set `SAFE_AG_TUI_NOTIFY=off` (or `0`/`false`/`no`) to disable. Notifications are
+a no-op on non-macOS hosts.
 
 ## Footer modes
 
@@ -110,7 +137,7 @@ On macOS, `attach` and `resume` open iTerm2 by default. If iTerm2 is not install
 | `c` | transfer files |
 | `n` | open spawn form |
 | `p` | toggle preview pane |
-| `f` | diff |
+| `f` | diff (plain; press `s` inside for side-by-side) |
 | `x` | checkpoint create |
 | `t` | todo list |
 | `m` | MCP login |
@@ -150,6 +177,15 @@ Current `:` commands:
 | `audit` | open the audit view |
 
 Unknown commands produce a footer error status.
+
+## Diff view
+
+`f` opens the selected agent's `git diff` in a plain, scrollable overlay. tview
+overlays render plain text only, so delta's truecolor side-by-side output cannot
+display cleanly in the bordered pane. Pressing `s` inside the diff overlay
+suspends the TUI and renders `safe-ag diff --side-by-side` (delta, run inside the
+container) through a pager in the restored terminal, where its ANSI colors show
+correctly; on quit the TUI resumes.
 
 ## Preview pane
 
