@@ -194,7 +194,7 @@ func TestReadCodexConfigSanitizesHostOnlyBlocks(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "agents"), 0o755); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
-content := `model = "gpt-5"
+	content := `model = "gpt-5"
 notify = ["/Applications/Codex.app/notify"]
 check_for_update_on_startup = true
 
