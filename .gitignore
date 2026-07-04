@@ -7,5 +7,4 @@ bin/safe-ag
 bin/safe-ag-tui
 
 app/bin/
-app/frontend/node_modules/
 app/frontend/dist/
