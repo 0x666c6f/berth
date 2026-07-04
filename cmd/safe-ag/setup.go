@@ -1005,6 +1005,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if containerErr != nil {
 		fmt.Println()
 		fmt.Println("Install Apple container: https://github.com/apple/container")
+		diagnoseSpawnDefaults()
 		return nil
 	}
 
@@ -1018,6 +1019,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 	if !vmExists {
 		fmt.Println()
 		fmt.Println("Run: safe-ag setup")
+		diagnoseSpawnDefaults()
 		return nil
 	}
 
@@ -1076,13 +1078,7 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		check("Worktree mount disabled (home-mount=none)", homeMount != "rw", detail)
 	}
 
-	cfg, cfgErr := config.LoadDefaults(config.DefaultsPath())
-	if cfgErr != nil {
-		fmt.Println()
-		fmt.Printf("Spawn defaults\n  ! could not read %s: %v\n", config.DefaultsPath(), cfgErr)
-	} else {
-		printDiagnoseSpawnDefaults(os.Stdout, cfg, config.DefaultsPath())
-	}
+	cfgErr := diagnoseSpawnDefaults()
 
 	fmt.Println()
 	infraOK := containerErr == nil && systemErr == nil && vmExists && dockerErr == nil && imageExists
@@ -1099,6 +1095,21 @@ func runDiagnose(cmd *cobra.Command, args []string) error {
 		fmt.Println("Some checks failed. Run: safe-ag setup")
 	}
 
+	return nil
+}
+
+// diagnoseSpawnDefaults prints the spawn-defaults section and returns the
+// config load error. Spawn defaults exist independently of the container
+// runtime, so the early-exit diagnose paths (no `container` binary, no VM)
+// still surface risky defaults like ssh/reuse_auth enabled.
+func diagnoseSpawnDefaults() error {
+	cfg, cfgErr := config.LoadDefaults(config.DefaultsPath())
+	if cfgErr != nil {
+		fmt.Println()
+		fmt.Printf("Spawn defaults\n  ! could not read %s: %v\n", config.DefaultsPath(), cfgErr)
+		return cfgErr
+	}
+	printDiagnoseSpawnDefaults(os.Stdout, cfg, config.DefaultsPath())
 	return nil
 }
 
