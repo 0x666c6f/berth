@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,7 +17,26 @@ import (
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// agentSupportsResume reports whether an agent type has a continue mode.
+func agentSupportsResume(agentType string) bool {
+	return agentType == "claude" || agentType == "codex"
+}
+
+// authVolumePersists reports whether the auth volume (which holds the agent's
+// conversation transcript under ~/.claude / ~/.codex) survives a container
+// stop. Ephemeral auth is tmpfs-backed and lost on stop; shared and
+// fleet-isolated auth are named volumes that persist.
+func authVolumePersists(authType string) bool {
+	switch authType {
+	case "shared", "fleet-isolated":
+		return true
+	default: // "ephemeral" or unknown
+		return false
+	}
+}
 
 // ─── list ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +64,11 @@ func runList(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("list containers: %w", err)
 		}
-		fmt.Print(string(out))
+		// Emit the raw docker ps JSON per line, augmented with a "state" field
+		// (agentstate classification). Existing fields are preserved verbatim.
+		for _, line := range splitLines(string(out)) {
+			fmt.Println(augmentListJSON(ctx, exec, line))
+		}
 		return nil
 	}
 
@@ -104,13 +128,49 @@ func runList(cmd *cobra.Command, args []string) error {
 		if e.fleet != "" {
 			indent = "  "
 		}
-		fmt.Printf("%s%s %s %s  %s  %s\n", indent, statusIcon, typeIcon, e.name, e.repo, e.status)
+		state := gatherStatus(ctx, exec, e.name).State
+		fmt.Printf("%s%s %s %s  %s  %s %-8s  %s\n",
+			indent, statusIcon, typeIcon, e.name, e.repo, stateIcon(state), state, e.status)
 	}
 	fmt.Println()
 	return nil
 }
 
+// augmentListJSON adds a "state" field to a single docker ps JSON line without
+// touching the existing fields (backward compatible). Lines that are not JSON
+// objects are returned unchanged.
+func augmentListJSON(ctx context.Context, exec vmexec.Executor, line string) string {
+	var meta struct {
+		Names string `json:"Names"`
+	}
+	if err := json.Unmarshal([]byte(line), &meta); err != nil || meta.Names == "" {
+		return line
+	}
+	return injectStateField(line, gatherStatus(ctx, exec, meta.Names).State)
+}
+
+// injectStateField appends "state":<state> to a JSON object line, preserving
+// every existing field. Non-object lines are returned unchanged.
+func injectStateField(line, state string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasSuffix(trimmed, "}") {
+		return trimmed
+	}
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		return trimmed
+	}
+	inner := trimmed[:len(trimmed)-1]
+	sep := ","
+	if strings.HasSuffix(strings.TrimSpace(inner), "{") { // empty object
+		sep = ""
+	}
+	return inner + sep + `"state":` + string(stateJSON) + "}"
+}
+
 // ─── attach ────────────────────────────────────────────────────────────────
+
+var attachResume bool
 
 var attachCmd = &cobra.Command{
 	Use:   "attach <name|--latest>",
@@ -121,6 +181,7 @@ var attachCmd = &cobra.Command{
 
 func init() {
 	addLatestFlag(attachCmd)
+	attachCmd.Flags().BoolVar(&attachResume, "resume", false, "Continue the agent's previous conversation instead of a fresh session")
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -143,6 +204,10 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	// Check terminal mode
 	termMode, _ := docker.InspectLabel(ctx, exec, name, labels.Terminal)
 	usesTmux := termMode == "tmux" || termMode == ""
+
+	if attachResume {
+		return resumeAttach(ctx, exec, name, state, usesTmux)
+	}
 
 	switch state {
 	case "running":
@@ -169,6 +234,62 @@ func runAttach(cmd *cobra.Command, args []string) error {
 
 	default:
 		return fmt.Errorf("container %s is in state %q, cannot attach", name, state)
+	}
+}
+
+// resumeAttach reattaches to an agent while continuing its previous
+// conversation instead of starting fresh.
+func resumeAttach(ctx context.Context, exec vmexec.Executor, name, state string, usesTmux bool) error {
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	if !agentSupportsResume(agentType) {
+		return fmt.Errorf("--resume only supports claude and codex agents (%s is %q)", name, agentType)
+	}
+	if !usesTmux {
+		return fmt.Errorf("--resume requires a tmux session; container %s does not use tmux", name)
+	}
+
+	switch state {
+	case "running":
+		// A live session means the agent is still active — attaching already
+		// drops the user back into the ongoing conversation.
+		if has, _ := tmux.HasSession(ctx, exec, name); has {
+			return tmux.Attach(exec, name)
+		}
+		// Running but no tmux session: we cannot tell a session that just
+		// exited from a headless agent (e.g. --background) that is still alive.
+		// Relaunching here could start a SECOND agent against the same workspace
+		// and auth volume, so refuse and point at the safe options.
+		return fmt.Errorf(
+			"container %s is running but has no attachable tmux session; the agent may still be running headless.\n"+
+				"Use `safe-ag steer %s \"...\"` to send it input, or `safe-ag stop %s` then `safe-ag attach %s --resume` to restart and continue.",
+			name, name, name, name)
+
+	case "exited", "created":
+		authType, _ := docker.InspectLabel(ctx, exec, name, labels.AuthType)
+		if !authVolumePersists(authType) {
+			// Ephemeral auth was tmpfs-backed and is gone now the container is
+			// stopped. Restarting cannot start fresh either: the entrypoint's
+			// session-state marker (persisted in the workspace volume) makes the
+			// agent auto-continue against an empty auth dir and error out. There
+			// is no clean host-side way to clear that marker on a stopped
+			// container, so refuse and point at a fresh run.
+			return fmt.Errorf(
+				"container %s used ephemeral auth; its conversation transcript was tmpfs-backed and did not survive the stop, so --resume cannot recover it.\n"+
+					"Use `safe-ag attach %s` (without --resume) or `safe-ag retry %s` for a fresh run, or re-run the task with --reuse-auth so future sessions persist.",
+				name, name, name)
+		}
+		// Restarting re-runs the entrypoint, which auto-resumes from its
+		// session-state file (the auth volume persisted).
+		if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
+			return fmt.Errorf("start container %s: %w", name, err)
+		}
+		if err := tmux.WaitForSession(ctx, exec, name); err != nil {
+			return err
+		}
+		return tmux.Attach(exec, name)
+
+	default:
+		return fmt.Errorf("container %s is in state %q, cannot resume", name, state)
 	}
 }
 
@@ -354,6 +475,7 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 // ─── retry ─────────────────────────────────────────────────────────────────
 
 var retryFeedback string
+var retryResume bool
 
 var retryCmd = &cobra.Command{
 	Use:   "retry <name|--latest>",
@@ -364,6 +486,7 @@ var retryCmd = &cobra.Command{
 
 func init() {
 	retryCmd.Flags().StringVar(&retryFeedback, "feedback", "", "Feedback for the next attempt")
+	retryCmd.Flags().BoolVar(&retryResume, "resume", false, "Reuse the source auth volume and continue the previous conversation instead of re-running the prompt")
 	rootCmd.AddCommand(retryCmd)
 }
 
@@ -378,6 +501,10 @@ func runRetry(cmd *cobra.Command, args []string) error {
 	name, err := docker.ResolveTarget(ctx, exec, target)
 	if err != nil {
 		return err
+	}
+
+	if retryResume {
+		return resumeRetry(ctx, exec, name, retryFeedback)
 	}
 
 	opts, err := reconstructSpawnOpts(ctx, exec, name)
@@ -396,6 +523,75 @@ func runRetry(cmd *cobra.Command, args []string) error {
 	// Clear the name so a new container is spawned
 	opts.Name = ""
 	return executeSpawn(opts)
+}
+
+// resumeRetry continues the source container's conversation instead of spawning
+// a fresh attempt. Reusing the container itself is the surest way to reuse the
+// exact same session/auth volume (shared or fleet-isolated). A stopped container
+// is restarted so the entrypoint auto-resumes from its session-state file; a
+// running container must already hold a live session (otherwise we refuse rather
+// than risk a second headless agent). Optional feedback is delivered as a
+// follow-up message through the tmux input path, exactly like `steer`.
+func resumeRetry(ctx context.Context, exec vmexec.Executor, name, feedback string) error {
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	if !agentSupportsResume(agentType) {
+		return fmt.Errorf("--resume only supports claude and codex agents (%s is %q)", name, agentType)
+	}
+	termMode, _ := docker.InspectLabel(ctx, exec, name, labels.Terminal)
+	if termMode != "" && termMode != "tmux" {
+		return fmt.Errorf("--resume requires a tmux session; container %s does not use tmux", name)
+	}
+
+	running, _ := docker.IsRunning(ctx, exec, name)
+	authType, _ := docker.InspectLabel(ctx, exec, name, labels.AuthType)
+
+	// Ephemeral auth transcripts live on tmpfs; once the container stops they
+	// are gone, so --resume cannot recover them. Fail with an actionable hint
+	// instead of silently starting a fresh conversation.
+	if !running && !authVolumePersists(authType) {
+		return fmt.Errorf(
+			"container %s used ephemeral auth; its conversation transcript did not survive the stop, so --resume cannot recover it.\n"+
+				"Retry without --resume to start a fresh attempt (add --feedback to steer it), or re-run the task with --reuse-auth so future sessions persist.",
+			name)
+	}
+
+	if running {
+		// A running container with no tmux session may be a headless agent
+		// (e.g. --background) that is still alive. Relaunching would risk a
+		// second agent against the same workspace/auth volume, so refuse rather
+		// than guess. A live session is reused (feedback is steered in below).
+		if has, _ := tmux.HasSession(ctx, exec, name); !has {
+			return fmt.Errorf(
+				"container %s is still running but has no attachable tmux session; the agent may be running headless.\n"+
+					"Use `safe-ag steer %s \"...\"` to send input, or `safe-ag stop %s` first, then `safe-ag retry %s --resume`.",
+				name, name, name, name)
+		}
+	} else if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
+		// Restarting re-runs the entrypoint, which auto-resumes from its
+		// session-state file.
+		return fmt.Errorf("start container %s: %w", name, err)
+	}
+
+	if err := tmux.WaitForSession(ctx, exec, name); err != nil {
+		return err
+	}
+
+	if feedback != "" {
+		if _, err := exec.Run(ctx, "docker", "exec", name,
+			"tmux", "send-keys", "-t", tmux.SessionName(), "--", feedback, "Enter"); err != nil {
+			return fmt.Errorf("send feedback to %s: %w", name, err)
+		}
+	}
+
+	auditLogger := &audit.Logger{Path: audit.DefaultPath()}
+	auditLogger.Log("retry-resume", name, map[string]string{"feedback": fmt.Sprintf("%v", feedback != "")})
+	events.Emit(events.DefaultEventsPath(), "agent.resumed", map[string]string{"container": name})
+	fmt.Printf("Resumed %s\n", name)
+
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return tmux.Attach(exec, name)
+	}
+	return nil
 }
 
 // reconstructSpawnOpts reads labels and env vars from an existing container

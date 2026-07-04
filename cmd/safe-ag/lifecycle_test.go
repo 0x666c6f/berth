@@ -337,3 +337,240 @@ func TestRetryFeedbackNoOriginalPrompt(t *testing.T) {
 		t.Error("should start with feedback message when no original prompt")
 	}
 }
+
+// ─── session resume ────────────────────────────────────────────────────────
+
+func cmdsContain(cmds [][]string, want string) bool {
+	for _, c := range cmds {
+		if strings.Join(c, " ") == want || strings.Contains(strings.Join(c, " "), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAgentSupportsResume(t *testing.T) {
+	for _, tt := range []struct {
+		agent string
+		want  bool
+	}{
+		{"claude", true},
+		{"codex", true},
+		{"shell", false},
+		{"", false},
+	} {
+		if got := agentSupportsResume(tt.agent); got != tt.want {
+			t.Errorf("agentSupportsResume(%q) = %v, want %v", tt.agent, got, tt.want)
+		}
+	}
+}
+
+func TestAuthVolumePersists(t *testing.T) {
+	for _, tt := range []struct {
+		authType string
+		want     bool
+	}{
+		{"shared", true},
+		{"fleet-isolated", true},
+		{"ephemeral", false},
+		{"", false},
+	} {
+		if got := authVolumePersists(tt.authType); got != tt.want {
+			t.Errorf("authVolumePersists(%q) = %v, want %v", tt.authType, got, tt.want)
+		}
+	}
+}
+
+// A running container with a live tmux session is already mid-conversation:
+// resume just attaches, without restarting or relaunching.
+func TestResumeAttach_RunningLiveSession_AttachesOnly(t *testing.T) {
+	name := "agent-claude-live"
+	exec := buildFakeExec(name, map[string]string{"safe-agentic.agent-type": "claude"}, nil)
+
+	if err := resumeAttach(context.Background(), exec, name, "running", true); err != nil {
+		t.Fatalf("resumeAttach() error: %v", err)
+	}
+	if cmdsContain(exec.Log, "docker start") {
+		t.Error("should not restart a running container")
+	}
+	if cmdsContain(exec.Log, "new-session") {
+		t.Error("should not relaunch when a live session exists")
+	}
+	if !cmdsContain(exec.CommandsMatching("tmux attach"), "tmux attach") {
+		t.Error("should attach to the live session")
+	}
+}
+
+// Regression (P2): a RUNNING container with no live tmux session must NOT be
+// relaunched — a --background/headless agent may still be alive, so relaunching
+// would start a second agent against the same workspace and auth volume. Resume
+// must refuse instead, and must not `docker start` or `tmux new-session`.
+func TestResumeAttach_RunningNoSession_RefusesRelaunch(t *testing.T) {
+	name := "agent-claude-headless"
+	exec := buildFakeExec(name, map[string]string{"safe-agentic.agent-type": "claude"}, nil)
+	// HasSession returns false when `tmux has-session` errors.
+	exec.SetError("docker exec "+name+" tmux has-session", "no server running")
+
+	err := resumeAttach(context.Background(), exec, name, "running", true)
+	if err == nil || !strings.Contains(err.Error(), "no attachable tmux session") {
+		t.Fatalf("expected refusal error, got: %v", err)
+	}
+	if cmdsContain(exec.Log, "new-session") {
+		t.Error("must NOT relaunch a second agent on a running headless container")
+	}
+	if cmdsContain(exec.Log, "docker start") {
+		t.Error("must not restart a running container")
+	}
+	if cmdsContain(exec.CommandsMatching("tmux attach"), "tmux attach") {
+		t.Error("must not attach when refusing")
+	}
+}
+
+// A stopped container with a persistent auth volume is restarted; the entrypoint
+// auto-resumes from its session-state file, then we attach.
+func TestResumeAttach_StoppedSharedAuth_StartsThenAttaches(t *testing.T) {
+	name := "agent-claude-stopped"
+	exec := buildFakeExec(name, map[string]string{
+		"safe-agentic.agent-type": "claude",
+		"safe-agentic.auth":       "shared",
+	}, nil)
+
+	if err := resumeAttach(context.Background(), exec, name, "exited", true); err != nil {
+		t.Fatalf("resumeAttach() error: %v", err)
+	}
+	if !cmdsContain(exec.CommandsMatching("docker start"), "docker start "+name) {
+		t.Errorf("should restart the stopped container; log: %v", exec.Log)
+	}
+	if !cmdsContain(exec.CommandsMatching("tmux attach"), "tmux attach") {
+		t.Error("should attach after restart")
+	}
+}
+
+// Regression (P2 round 2): attach --resume on a STOPPED ephemeral-auth container
+// must refuse. Its tmpfs transcript is gone, and restarting can't start fresh —
+// the entrypoint's persisted session-state marker would auto-continue against an
+// empty auth dir and error. Refuse without `docker start`.
+func TestResumeAttach_EphemeralStopped_RefusesRestart(t *testing.T) {
+	name := "agent-claude-eph-stopped"
+	exec := buildFakeExec(name, map[string]string{
+		"safe-agentic.agent-type": "claude",
+		"safe-agentic.auth":       "ephemeral",
+	}, nil)
+
+	err := resumeAttach(context.Background(), exec, name, "exited", true)
+	if err == nil || !strings.Contains(err.Error(), "ephemeral") || !strings.Contains(err.Error(), "cannot recover") {
+		t.Fatalf("expected ephemeral-auth refusal, got: %v", err)
+	}
+	if cmdsContain(exec.Log, "docker start") {
+		t.Error("must NOT restart: it would auto-continue against an empty auth dir")
+	}
+	if cmdsContain(exec.CommandsMatching("tmux attach"), "tmux attach") {
+		t.Error("must not attach when refusing")
+	}
+}
+
+func TestResumeAttach_ShellAgent_Errors(t *testing.T) {
+	name := "agent-shell-x"
+	exec := buildFakeExec(name, map[string]string{"safe-agentic.agent-type": "shell"}, nil)
+
+	err := resumeAttach(context.Background(), exec, name, "running", true)
+	if err == nil || !strings.Contains(err.Error(), "claude and codex") {
+		t.Fatalf("expected unsupported-agent error, got: %v", err)
+	}
+}
+
+func TestResumeAttach_NonTmux_Errors(t *testing.T) {
+	name := "agent-claude-plain"
+	exec := buildFakeExec(name, map[string]string{"safe-agentic.agent-type": "claude"}, nil)
+
+	err := resumeAttach(context.Background(), exec, name, "running", false)
+	if err == nil || !strings.Contains(err.Error(), "tmux") {
+		t.Fatalf("expected tmux-required error, got: %v", err)
+	}
+}
+
+// Ephemeral-auth transcripts do not survive a stop, so resuming a stopped
+// ephemeral container must fail with an actionable error rather than silently
+// starting fresh.
+func TestResumeRetry_EphemeralStopped_Errors(t *testing.T) {
+	name := "agent-codex-eph"
+	exec := buildFakeExec(name, map[string]string{
+		"safe-agentic.agent-type": "codex",
+		"safe-agentic.terminal":   "tmux",
+		"safe-agentic.auth":       "ephemeral",
+	}, nil)
+	exec.SetResponse("docker inspect --format {{.State.Running}} "+name, "false\n")
+
+	err := resumeRetry(context.Background(), exec, name, "")
+	if err == nil || !strings.Contains(err.Error(), "ephemeral") || !strings.Contains(err.Error(), "cannot recover") {
+		t.Fatalf("expected ephemeral-auth error, got: %v", err)
+	}
+	if cmdsContain(exec.Log, "docker start") {
+		t.Error("must not restart when the transcript is unrecoverable")
+	}
+}
+
+// A stopped container with a persistent volume is restarted in resume mode; the
+// original prompt is NOT re-injected (agent-session.sh resumes) and feedback is
+// delivered through the tmux input path, never a fresh `docker run`.
+func TestResumeRetry_SharedStopped_StartsAndSendsFeedback(t *testing.T) {
+	name := "agent-claude-retry"
+	exec := buildFakeExec(name, map[string]string{
+		"safe-agentic.agent-type": "claude",
+		"safe-agentic.terminal":   "tmux",
+		"safe-agentic.auth":       "shared",
+	}, nil)
+	exec.SetResponse("docker inspect --format {{.State.Running}} "+name, "false\n")
+
+	feedback := "focus on the failing auth test"
+	if err := resumeRetry(context.Background(), exec, name, feedback); err != nil {
+		t.Fatalf("resumeRetry() error: %v", err)
+	}
+	if !cmdsContain(exec.CommandsMatching("docker start"), "docker start "+name) {
+		t.Errorf("should restart the source container; log: %v", exec.Log)
+	}
+	if cmdsContain(exec.Log, "docker run") {
+		t.Error("resume must reuse the source container, not spawn a fresh one")
+	}
+	sendKeys := exec.CommandsMatching("send-keys")
+	if len(sendKeys) == 0 || !cmdsContain(sendKeys, feedback) {
+		t.Errorf("feedback should be delivered via tmux send-keys; got: %v", sendKeys)
+	}
+}
+
+func TestResumeRetry_ShellAgent_Errors(t *testing.T) {
+	name := "agent-shell-retry"
+	exec := buildFakeExec(name, map[string]string{"safe-agentic.agent-type": "shell"}, nil)
+
+	err := resumeRetry(context.Background(), exec, name, "")
+	if err == nil || !strings.Contains(err.Error(), "claude and codex") {
+		t.Fatalf("expected unsupported-agent error, got: %v", err)
+	}
+}
+
+// Regression (P2): retry --resume on a RUNNING container with no live session
+// must refuse rather than relaunch, so it can't spawn a second headless agent.
+func TestResumeRetry_RunningNoSession_RefusesRelaunch(t *testing.T) {
+	name := "agent-codex-headless"
+	exec := buildFakeExec(name, map[string]string{
+		"safe-agentic.agent-type": "codex",
+		"safe-agentic.terminal":   "tmux",
+		"safe-agentic.auth":       "shared",
+	}, nil)
+	exec.SetResponse("docker inspect --format {{.State.Running}} "+name, "true\n")
+	exec.SetError("docker exec "+name+" tmux has-session", "no server running")
+
+	err := resumeRetry(context.Background(), exec, name, "fix the flake")
+	if err == nil || !strings.Contains(err.Error(), "headless") {
+		t.Fatalf("expected refusal error, got: %v", err)
+	}
+	if cmdsContain(exec.Log, "new-session") {
+		t.Error("must NOT relaunch a second agent on a running headless container")
+	}
+	if cmdsContain(exec.Log, "send-keys") {
+		t.Error("must not steer feedback when refusing")
+	}
+	if cmdsContain(exec.Log, "docker start") {
+		t.Error("must not restart an already-running container")
+	}
+}
