@@ -44,7 +44,7 @@ export function SpawnForm() {
             className={`btn ${req.Agent === t ? "bg-neutral-600" : ""}`}>{t}</button>
         ))}
       </div>
-      <input className="input" placeholder="repo URL (git@… or https://…)" value={req.Repo}
+      <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
         onChange={(e) => set("Repo", e.target.value)} />
       <textarea className="input min-h-24" placeholder="prompt (optional)" value={req.Prompt}
         onChange={(e) => set("Prompt", e.target.value)} />
@@ -59,8 +59,8 @@ export function SpawnForm() {
         <input className="input w-20" placeholder="cpus" value={req.CPUs} onChange={(e) => set("CPUs", e.target.value)} />
       </div>
       <div className="flex gap-2">
-        <button className="btn" disabled={!req.Repo} onClick={() => submit(true)}>Dry-run preview</button>
-        <button className="btn bg-green-800 hover:bg-green-700" disabled={!req.Repo} onClick={() => submit(false)}>Spawn</button>
+        <button className="btn" onClick={() => submit(true)}>Dry-run preview</button>
+        <button className="btn bg-green-800 hover:bg-green-700" onClick={() => submit(false)}>Spawn</button>
       </div>
       {preview && <pre className="whitespace-pre-wrap rounded bg-neutral-900 p-3 text-xs">{preview}</pre>}
     </div>

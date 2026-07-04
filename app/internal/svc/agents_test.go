@@ -42,6 +42,14 @@ func TestRetryWithFeedback(t *testing.T) {
 	}
 }
 
+func TestSpawnArgsNoRepo(t *testing.T) {
+	req := SpawnRequest{Agent: "shell", DryRun: false}
+	got := strings.Join(spawnArgs(req), " ")
+	if got != "spawn shell --background" {
+		t.Fatalf("argv: %q", got)
+	}
+}
+
 func TestSpawnArgs(t *testing.T) {
 	req := SpawnRequest{Agent: "claude", Repo: "git@github.com:o/r.git",
 		Prompt: "do it", SSH: true, ReuseAuth: true, Worktree: false,

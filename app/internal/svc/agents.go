@@ -113,7 +113,10 @@ type SpawnRequest struct {
 }
 
 func spawnArgs(req SpawnRequest) []string {
-	args := []string{"spawn", req.Agent, "--repo", req.Repo}
+	args := []string{"spawn", req.Agent}
+	if req.Repo != "" {
+		args = append(args, "--repo", req.Repo)
+	}
 	if req.Prompt != "" {
 		args = append(args, "--prompt", req.Prompt)
 	}
