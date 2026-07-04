@@ -458,14 +458,10 @@ case "$AGENT_TYPE" in
   claude)
     echo "[entrypoint] Launching Claude Code..."
     echo "[entrypoint] Container is the sandbox; Claude permission prompts are intentionally skipped."
-    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-      # Background mode: run directly, no tmux. Output goes to docker logs.
-      echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      agent_status=0
-      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
-      run_completion_callback "$agent_status"
-      exit "$agent_status"
-    fi
+    # Background mode runs inside tmux too: keeps the session attachable
+    # (safe-ag attach, desktop app terminals) and steer/peek functional,
+    # and makes the safe-agentic.terminal=tmux label truthful. Headless
+    # prompt runs behave identically — the session exits when the CLI does.
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else
@@ -508,13 +504,7 @@ case "$AGENT_TYPE" in
   codex)
     echo "[entrypoint] Launching Codex..."
     echo "[entrypoint] Container is the sandbox; Codex yolo mode is intentional here."
-    if [ "${SAFE_AGENTIC_BACKGROUND:-}" = "1" ]; then
-      echo "[entrypoint] Background mode — output to docker logs, not attachable."
-      agent_status=0
-      "$AGENT_SESSION_LIB" "${launch_args[@]}" || agent_status=$?
-      run_completion_callback "$agent_status"
-      exit "$agent_status"
-    fi
+    # Background mode runs inside tmux too (see claude arm).
     if [ "${#launch_args[@]}" -gt 0 ]; then
       start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
     else
@@ -532,6 +522,26 @@ case "$AGENT_TYPE" in
         tmux send-keys -t "$TMUX_SESSION_NAME" Enter
       ) &
     fi
+    wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
+    agent_status=$(session_exit_code)
+    run_completion_callback "$agent_status"
+    exit "$agent_status"
+    ;;
+  shell)
+    echo "[entrypoint] Starting shell session in tmux."
+    echo "[entrypoint] All tools available. Repos in /workspace/."
+    # Shell sessions live in tmux like the AI agents: survives background
+    # spawns (bash keeps a pty), attachable from safe-ag attach and the
+    # desktop app, steer/peek work.
+    if [ "${#launch_args[@]}" -gt 0 ]; then
+      start_tmux_session "$TMUX_SESSION_NAME" "${launch_args[@]}"
+    else
+      start_tmux_session "$TMUX_SESSION_NAME"
+    fi
+    wait_for_tmux_session_start "$TMUX_SESSION_NAME" || {
+      echo "[entrypoint] tmux session failed to start" >&2
+      exit 1
+    }
     wait_for_tmux_session_exit "$TMUX_SESSION_NAME"
     agent_status=$(session_exit_code)
     run_completion_callback "$agent_status"
