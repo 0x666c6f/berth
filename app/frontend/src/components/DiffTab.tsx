@@ -3,6 +3,7 @@ import { html as diffHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { useStore } from "../store";
+import { errText } from "../types";
 
 export function DiffTab({ name }: { name: string }) {
   const toast = useStore((s) => s.toast);
@@ -11,13 +12,13 @@ export function DiffTab({ name }: { name: string }) {
   const [ref, setRef] = useState("");
 
   const reload = () => {
-    AgentService.Diff(name).then(setDiff).catch((e: unknown) => toast(String(e)));
+    AgentService.Diff(name).then(setDiff).catch((e: unknown) => toast(errText("diff", e)));
     AgentService.CheckpointList(name).then(setCheckpoints).catch(() => setCheckpoints(""));
   };
   useEffect(() => { reload(); }, [name]);
 
   const act = (label: string, fn: () => Promise<unknown>) => async () => {
-    try { await fn(); toast(`${label}: ok`); reload(); } catch (e) { toast(String(e)); }
+    try { await fn(); toast(`${label}: ok`); reload(); } catch (e) { toast(errText("diff", e)); }
   };
 
   return (

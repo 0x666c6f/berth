@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore, statusFor } from "../store";
+import { errText } from "../types";
 import { StatusDot } from "./StatusDot";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
@@ -28,7 +29,7 @@ export function FleetView() {
       <span className="text-xs text-neutral-500">{a.Hierarchy}</span>
       {!a.Running && (
         <button className="btn" onClick={() =>
-          AgentService.Retry(a.Name, "").then(() => toast("retried")).catch((e: unknown) => toast(String(e)))}>
+          AgentService.Retry(a.Name, "").then(() => toast("retried")).catch((e: unknown) => toast(errText("fleet", e)))}>
           retry
         </button>
       )}
@@ -43,7 +44,7 @@ export function FleetView() {
           {pipelines.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
         <button className="btn" disabled={!pick} onClick={() =>
-          AgentService.PipelineRun(pick).then((o: string) => toast(o)).catch((e: unknown) => toast(String(e)))
+          AgentService.PipelineRun(pick).then((o: string) => toast(o)).catch((e: unknown) => toast(errText("fleet", e)))
         }>Run</button>
       </div>
       {[...fleets.entries()].map(([name, list]) => (

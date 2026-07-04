@@ -8,6 +8,7 @@ function Row({ a }: { a: Agent }) {
   return (
     <button
       onClick={() => { select(a.Name); setView("agents"); }}
+      title={[a.Repo, a.StateReason || a.Status].filter(Boolean).join(" — ")}
       className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-neutral-800 ${selected === a.Name ? "bg-neutral-800" : ""}`}
     >
       <StatusDot status={st} />

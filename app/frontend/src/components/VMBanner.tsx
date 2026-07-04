@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { errText } from "../types";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 
 export function VMBanner() {
@@ -15,7 +16,7 @@ export function VMBanner() {
         onClick={async () => {
           setBusy(true);
           try { toast(await AgentService.VMStart()); }
-          catch (e) { toast(String(e)); }
+          catch (e) { toast(errText("vm start", e)); }
           finally { setBusy(false); }
         }}
       >

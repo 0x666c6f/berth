@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
 import { useStore } from "../store";
+import { errText } from "../types";
 
 type Item = { timestamp: string; type: string; status: string; container: string; payload?: Record<string, string> };
 
@@ -17,7 +18,7 @@ export function Timeline() {
 
   const reload = () => {
     const call = inboxOnly ? Service.Inbox(200) : Service.EventsTail(200);
-    call.then((i: any) => setItems(([...(i ?? [])] as Item[]).reverse())).catch((e: unknown) => toast(String(e)));
+    call.then((i: any) => setItems(([...(i ?? [])] as Item[]).reverse())).catch((e: unknown) => toast(errText("timeline", e)));
   };
   useEffect(reload, [inboxOnly]);
 

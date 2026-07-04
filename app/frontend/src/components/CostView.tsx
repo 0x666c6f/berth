@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { useStore } from "../store";
+import { errText } from "../types";
 
 export function CostView() {
   const toast = useStore((s) => s.toast);
@@ -8,7 +9,7 @@ export function CostView() {
   const [out, setOut] = useState("");
 
   useEffect(() => {
-    AgentService.CostHistory(window).then(setOut).catch((e: unknown) => { setOut(""); toast(String(e)); });
+    AgentService.CostHistory(window).then(setOut).catch((e: unknown) => { setOut(""); toast(errText("cost", e)); });
   }, [window]);
 
   return (

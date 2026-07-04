@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { Service } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/state";
 import { useStore } from "../store";
+import { errText } from "../types";
 
 export function InfoTab({ name }: { name: string }) {
   const { agents, toast } = useStore();
@@ -32,7 +33,7 @@ export function InfoTab({ name }: { name: string }) {
       </table>
       <div>
         <button className="btn" onClick={() =>
-          AgentService.Cost(name).then(setCost).catch((e: unknown) => toast(String(e)))}>
+          AgentService.Cost(name).then(setCost).catch((e: unknown) => toast(errText("info", e)))}>
           Compute cost
         </button>
         {cost && <pre className="mt-2 whitespace-pre-wrap rounded bg-neutral-900 p-3">{cost}</pre>}

@@ -37,7 +37,7 @@ interface State {
   setView: (v: View) => void;
 }
 
-export const useStore = create<State>((set) => ({
+export const useStore = create<State>()((set) => ({
   agents: [], needsYou: {}, reviewReady: {},
   selected: null, split: null, vmOk: true, vmError: "",
   toasts: [], view: "agents",
@@ -56,7 +56,22 @@ export const useStore = create<State>((set) => ({
   select: (selected) => set({ selected }),
   setSplit: (split) => set({ split }),
   setVM: (vmOk, vmError) => set({ vmOk, vmError }),
-  toast: (text) => set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, text }] })),
+  toast: (text) =>
+    set((s) => {
+      // Dedup identical messages; cap the stack at 5 (drop oldest).
+      if (s.toasts.some((t) => t.text === text)) return {};
+      const id = ++toastSeq;
+      setTimeout(() => useStore.getState().dismissToast(id), 8000);
+      const toasts = [...s.toasts, { id, text }];
+      return { toasts: toasts.slice(-5) };
+    }),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setView: (view) => set({ view }),
 }));
+
+// Dev-only: expose the store for browser-preview UX testing
+// (wails3 dev in a browser has no runtime bridge, so views are driven
+// by injecting fixture state).
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__store = useStore;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Command } from "cmdk";
 import { useStore } from "../store";
+import { errText } from "../types";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 
 export function Palette() {
@@ -19,7 +20,7 @@ export function Palette() {
   if (!open) return null;
   const go = (fn: () => void) => () => { fn(); setOpen(false); };
   const run = (label: string, p: Promise<unknown>) =>
-    p.then(() => toast(`${label}: ok`)).catch((e: unknown) => toast(String(e)));
+    p.then(() => toast(`${label}: ok`)).catch((e: unknown) => toast(errText("action", e)));
 
   const actions: [string, () => void][] = [
     ["Spawn agent", () => setView("spawn")],

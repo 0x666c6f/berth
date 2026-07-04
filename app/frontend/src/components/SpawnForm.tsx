@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { useStore } from "../store";
+import { errText } from "../types";
 
 export function SpawnForm() {
   const { toast, setView } = useStore();
@@ -25,8 +26,8 @@ export function SpawnForm() {
     try {
       const out = await AgentService.Spawn({ ...req, DryRun: dryRun } as any);
       if (dryRun) setPreview(out);
-      else { toast(`spawned:\n${out}`); setView("agents"); }
-    } catch (e) { toast(String(e)); }
+      else { toast(`spawned:\n${out.trim().split("\n").slice(-3).join("\n")}`); setView("agents"); }
+    } catch (e) { toast(errText(dryRun ? "dry-run" : "spawn", e)); }
   };
 
   const Check = ({ k, label }: { k: "SSH" | "ReuseAuth" | "Worktree"; label: string }) => (
@@ -41,7 +42,9 @@ export function SpawnForm() {
       <div className="flex gap-2">
         {["claude", "codex", "shell"].map((t) => (
           <button key={t} onClick={() => set("Agent", t)}
-            className={`btn ${req.Agent === t ? "bg-neutral-600" : ""}`}>{t}</button>
+            className={req.Agent === t
+              ? "rounded bg-blue-800 px-3 py-1 text-xs text-white ring-1 ring-blue-400"
+              : "btn"}>{t}</button>
         ))}
       </div>
       <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
