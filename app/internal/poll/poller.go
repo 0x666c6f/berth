@@ -3,7 +3,6 @@ package poll
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -23,14 +22,20 @@ type Poller struct {
 	lastOK  *bool
 	stop    chan struct{}
 	stopped sync.Once
+	done    chan struct{}
+	started bool
+	pollMu  sync.Mutex // serializes pollOnce across ticker and ForceRefresh
 }
 
 func NewPoller(exec vmexec.Executor, em emit.Emitter, interval time.Duration) *Poller {
-	return &Poller{exec: exec, em: em, interval: interval, stop: make(chan struct{})}
+	return &Poller{exec: exec, em: em, interval: interval,
+		stop: make(chan struct{}), done: make(chan struct{})}
 }
 
 func (p *Poller) Start() {
+	p.started = true
 	go func() {
+		defer close(p.done)
 		p.pollOnce()
 		t := time.NewTicker(p.interval)
 		defer t.Stop()
@@ -45,7 +50,17 @@ func (p *Poller) Start() {
 	}()
 }
 
-func (p *Poller) Stop()         { p.stopped.Do(func() { close(p.stop) }) }
+// Stop blocks until the poll loop has exited and any in-flight poll
+// (including ForceRefresh) has drained — no emits after Stop returns.
+func (p *Poller) Stop() {
+	p.stopped.Do(func() { close(p.stop) })
+	if p.started {
+		<-p.done
+	}
+	p.pollMu.Lock()
+	p.pollMu.Unlock() //nolint:staticcheck // drain in-flight pollOnce
+}
+
 func (p *Poller) ForceRefresh() { go p.pollOnce() }
 
 func (p *Poller) Snapshot() []Agent {
@@ -64,7 +79,32 @@ func (p *Poller) setVMStatus(ok bool, errMsg string) {
 	}
 }
 
+// semanticEqual compares snapshots ignoring volatile docker-stats fields
+// (CPU/Memory/NetIO/PIDs churn every poll on any busy container and would
+// defeat change-diffing).
+func semanticEqual(a, b []Agent) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		x, y := a[i], b[i]
+		x.CPU, x.Memory, x.NetIO, x.PIDs = "", "", "", ""
+		y.CPU, y.Memory, y.NetIO, y.PIDs = "", "", "", ""
+		if x != y {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *Poller) pollOnce() {
+	p.pollMu.Lock()
+	defer p.pollMu.Unlock()
+	select {
+	case <-p.stop:
+		return
+	default:
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := p.exec.Run(ctx, "docker", "ps", "-a",
@@ -79,7 +119,7 @@ func (p *Poller) pollOnce() {
 	probeActivities(ctx, p.exec, agents)
 
 	p.mu.Lock()
-	changed := !reflect.DeepEqual(agents, p.last)
+	changed := !semanticEqual(agents, p.last)
 	if changed {
 		p.last = agents
 	}
