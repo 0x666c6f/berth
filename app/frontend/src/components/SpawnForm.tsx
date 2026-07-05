@@ -8,7 +8,7 @@ export function SpawnForm() {
   const { toast, setView } = useStore();
   const [req, setReq] = useState({
     Agent: "claude", Name: "", Repo: "", Prompt: "", Template: "", Network: "",
-    Memory: "", CPUs: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
+    Memory: "", CPUs: "", MaxCost: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
   });
   const [templates, setTemplates] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
@@ -84,6 +84,8 @@ export function SpawnForm() {
         <input className="input flex-1" placeholder="network (blank = dedicated)" value={req.Network} onChange={(e) => set("Network", e.target.value)} />
         <input className="input w-24" placeholder="memory" value={req.Memory} onChange={(e) => set("Memory", e.target.value)} />
         <input className="input w-20" placeholder="cpus" value={req.CPUs} onChange={(e) => set("CPUs", e.target.value)} />
+        <input className="input w-28" placeholder="max cost $" title="Kill the agent when its estimated API spend exceeds this budget"
+          value={req.MaxCost} onChange={(e) => set("MaxCost", e.target.value)} />
       </div>
       <div className="flex gap-2">
         <button className="btn" onClick={() => submit(true)}>Dry-run preview</button>

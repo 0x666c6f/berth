@@ -95,3 +95,10 @@ func TestCloneReconstructsSpawn(t *testing.T) {
 		t.Fatalf("\ngot:  %s\nwant: %s", got, want)
 	}
 }
+
+func TestSpawnArgsMaxCost(t *testing.T) {
+	got := strings.Join(spawnArgs(SpawnRequest{Agent: "claude", MaxCost: "2.50"}), " ")
+	if got != "spawn claude --max-cost 2.50 --background" {
+		t.Fatalf("argv: %q", got)
+	}
+}

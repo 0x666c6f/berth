@@ -10,6 +10,11 @@ export interface SpawnRequest {
     "Network": string;
     "Memory": string;
     "CPUs": string;
+
+    /**
+     * USD; engine kills the agent past this budget
+     */
+    "MaxCost": string;
     "SSH": boolean;
     "ReuseAuth": boolean;
     "Worktree": boolean;

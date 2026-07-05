@@ -164,6 +164,7 @@ func (s *AgentService) PipelineRun(file string) (string, error) {
 
 type SpawnRequest struct {
 	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
+	MaxCost                                                    string // USD; engine kills the agent past this budget
 	SSH, ReuseAuth, Worktree, DryRun                           bool
 }
 
@@ -202,6 +203,9 @@ func spawnArgs(req SpawnRequest) []string {
 	}
 	if req.CPUs != "" {
 		args = append(args, "--cpus", req.CPUs)
+	}
+	if req.MaxCost != "" {
+		args = append(args, "--max-cost", req.MaxCost)
 	}
 	args = append(args, "--background")
 	if req.DryRun {

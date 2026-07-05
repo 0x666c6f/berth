@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/dock"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/emit"
@@ -58,9 +60,8 @@ func (w *wailsEmitter) Emit(name string, data any) {
 
 var _ emit.Emitter = (*wailsEmitter)(nil)
 
-// trayHeader is the disabled first row: the aggregate "active status".
-func trayHeader(agents []poll.Agent, needsYou map[string]bool) string {
-	working, needs, idle := 0, 0, 0
+// countStates aggregates running agents into working / needs-you / idle.
+func countStates(agents []poll.Agent, needsYou map[string]bool) (working, needs, idle int) {
 	for _, a := range agents {
 		if !a.Running {
 			continue
@@ -74,6 +75,12 @@ func trayHeader(agents []poll.Agent, needsYou map[string]bool) string {
 			idle++
 		}
 	}
+	return
+}
+
+// trayHeader is the disabled first row: the aggregate "active status".
+func trayHeader(agents []poll.Agent, needsYou map[string]bool) string {
+	working, needs, idle := countStates(agents, needsYou)
 	if working+needs+idle == 0 {
 		return "No active chats"
 	}
@@ -115,6 +122,7 @@ func main() {
 
 	agentSvc := &svc.AgentService{Runner: runner, Poller: poller, Exec: exec}
 	termSvc := &svc.TerminalService{Manager: termMgr}
+	dockSvc := dock.New()
 
 	app := application.New(application.Options{
 		Name: "safe-ag-app",
@@ -122,6 +130,7 @@ func main() {
 			application.NewService(agentSvc),
 			application.NewService(termSvc),
 			application.NewService(stateSvc),
+			application.NewService(dockSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -159,6 +168,12 @@ func main() {
 			if !found {
 				delete(needsYou, name)
 			}
+		}
+		// Dock badge mirrors the needs-you count (Omnigent-style).
+		if _, needs, _ := countStates(agents, needsYou); needs > 0 {
+			dockSvc.SetBadge(strconv.Itoa(needs))
+		} else {
+			dockSvc.RemoveBadge()
 		}
 		menu := application.NewMenu()
 		menu.Add(trayHeader(agents, needsYou)).SetEnabled(false)
