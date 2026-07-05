@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -185,6 +187,30 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 }
 
+// pushClaudeConfig copies the host's CURRENT settings.json into a container,
+// best-effort. Spawn-time env injection freezes config at creation; this
+// keeps preferences dynamic for containers attached/resumed later. Applies
+// on the agent's next process start inside the container.
+func pushClaudeConfig(ctx context.Context, exec vmexec.Executor, name string) {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		dir = filepath.Join(home, ".claude")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		return
+	}
+	b64 := base64.StdEncoding.EncodeToString(data)
+	if _, err := exec.Run(ctx, "docker", "exec", name, "bash", "-c",
+		"mkdir -p ~/.claude && echo '"+b64+"' | base64 -d > ~/.claude/settings.json"); err != nil {
+		fmt.Fprintf(os.Stderr, "note: could not sync Claude settings into %s: %v\n", name, err)
+	}
+}
+
 func runAttach(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	exec := newExecutor()
@@ -211,6 +237,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 
 	switch state {
 	case "running":
+		pushClaudeConfig(ctx, exec, name)
 		if usesTmux {
 			if has, _ := tmux.HasSession(ctx, exec, name); has {
 				return tmux.Attach(exec, name)
@@ -224,6 +251,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
 			return fmt.Errorf("start container %s: %w", name, err)
 		}
+		pushClaudeConfig(ctx, exec, name)
 		if usesTmux {
 			if err := tmux.WaitForSession(ctx, exec, name); err != nil {
 				return err
@@ -283,6 +311,7 @@ func resumeAttach(ctx context.Context, exec vmexec.Executor, name, state string,
 		if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
 			return fmt.Errorf("start container %s: %w", name, err)
 		}
+		pushClaudeConfig(ctx, exec, name)
 		if err := tmux.WaitForSession(ctx, exec, name); err != nil {
 			return err
 		}
@@ -570,6 +599,8 @@ func resumeRetry(ctx context.Context, exec vmexec.Executor, name, feedback strin
 		// Restarting re-runs the entrypoint, which auto-resumes from its
 		// session-state file.
 		return fmt.Errorf("start container %s: %w", name, err)
+	} else {
+		pushClaudeConfig(ctx, exec, name)
 	}
 
 	if err := tmux.WaitForSession(ctx, exec, name); err != nil {
