@@ -1,25 +1,89 @@
+import { useEffect, useState } from "react";
 import { useStore, statusFor } from "../store";
 import { StatusDot } from "./StatusDot";
+import { errText } from "../types";
+import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import type { Agent, View } from "../types";
 
-function Row({ a }: { a: Agent }) {
+type MenuState = { agent: Agent; x: number; y: number } | null;
+
+function ActionMenu({ menu, close }: { menu: MenuState; close: () => void }) {
+  const { toast, select, setView, selected } = useStore();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [close]);
+  if (!menu) return null;
+  const { agent: a } = menu;
+  const act = (label: string, fn: () => Promise<unknown>) => () => {
+    close();
+    fn().then((out) => toast(typeof out === "string" && out.trim() ? `${label}:\n${out.trim().split("\n").slice(-2).join("\n")}` : `${label}: ok`))
+      .catch((e) => toast(errText(label, e)));
+  };
+  const Item = ({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) => (
+    <button onClick={onClick}
+      className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-neutral-700 ${danger ? "text-red-400" : ""}`}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="fixed inset-0 z-50" onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }}>
+      <div
+        className="absolute w-56 rounded-md border border-neutral-700 bg-neutral-800 py-1 shadow-xl"
+        style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 260) }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Item label="Open" onClick={() => { close(); select(a.Name); setView("agents"); }} />
+        <Item label="Clone session" onClick={act("clone", () => AgentService.Clone(a.Name))} />
+        {!a.Running && <Item label="Retry (same config)" onClick={act("retry", () => AgentService.Retry(a.Name, ""))} />}
+        {a.Running && <Item label="Checkpoint now" onClick={act("checkpoint", () => AgentService.CheckpointCreate(a.Name, ""))} />}
+        {a.Running && <Item label="Refresh prefs & restart" onClick={act("config sync", () => AgentService.ConfigSync(a.Name, true))} />}
+        <Item label="Create PR" onClick={act("pr", () => AgentService.PR(a.Name))} />
+        <div className="my-1 border-t border-neutral-700" />
+        <Item danger label="Delete session" onClick={() => {
+          close();
+          if (!window.confirm(`Delete ${a.Name}? This stops and removes the container.`)) return;
+          AgentService.Stop(a.Name)
+            .then(() => { toast(`deleted ${a.Name}`); if (selected === a.Name) select(null); })
+            .catch((e) => toast(errText("delete", e)));
+        }} />
+      </div>
+    </div>
+  );
+}
+
+function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: number) => void }) {
   const { selected, select, needsYou, reviewReady, setView } = useStore();
   const st = statusFor(a, needsYou, reviewReady);
   return (
-    <button
-      onClick={() => { select(a.Name); setView("agents"); }}
-      title={[a.Repo, a.StateReason || a.Status].filter(Boolean).join(" — ")}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-neutral-800 ${selected === a.Name ? "bg-neutral-800" : ""}`}
+    <div
+      className={`group flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-neutral-800 ${selected === a.Name ? "bg-neutral-800" : ""}`}
+      onContextMenu={(e) => { e.preventDefault(); openMenu(a, e.clientX, e.clientY); }}
     >
-      <StatusDot status={st} />
-      <span className="truncate">{a.Name.replace(/^agent-/, "")}</span>
-      <span className="ml-auto text-xs text-neutral-500">{a.Type}</span>
-    </button>
+      <button
+        onClick={() => { select(a.Name); setView("agents"); }}
+        title={[a.Repo, a.StateReason || a.Status].filter(Boolean).join(" — ")}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        <StatusDot status={st} />
+        <span className="truncate">{a.Name.replace(/^agent-/, "")}</span>
+      </button>
+      <span className="text-xs text-neutral-500 group-hover:hidden">{a.Type}</span>
+      <button
+        className="hidden rounded px-1 text-neutral-400 hover:bg-neutral-700 group-hover:block"
+        title="Actions"
+        onClick={(e) => { e.stopPropagation(); const r = (e.target as HTMLElement).getBoundingClientRect(); openMenu(a, r.left, r.bottom + 4); }}
+      >⋯</button>
+    </div>
   );
 }
 
 export function Sidebar() {
   const { agents, setView, view } = useStore();
+  const [menu, setMenu] = useState<MenuState>(null);
+  const openMenu = (agent: Agent, x: number, y: number) => setMenu({ agent, x, y });
+
   const fleets = new Map<string, Agent[]>();
   const solo: Agent[] = [];
   const stopped: Agent[] = [];
@@ -45,14 +109,15 @@ export function Sidebar() {
         {[...fleets.entries()].map(([name, list]) => (
           <div key={name}>
             <div className="px-3 pt-2 text-xs uppercase text-neutral-500">{name}</div>
-            {list.map((a) => <Row key={a.Name} a={a} />)}
+            {list.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
           </div>
         ))}
         {solo.length > 0 && <div className="px-3 pt-2 text-xs uppercase text-neutral-500">agents</div>}
-        {solo.map((a) => <Row key={a.Name} a={a} />)}
+        {solo.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
         {stopped.length > 0 && <div className="px-3 pt-2 text-xs uppercase text-neutral-500">stopped</div>}
-        {stopped.map((a) => <Row key={a.Name} a={a} />)}
+        {stopped.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
       </div>
+      <ActionMenu menu={menu} close={() => setMenu(null)} />
     </aside>
   );
 }

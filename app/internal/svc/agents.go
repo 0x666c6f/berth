@@ -2,17 +2,20 @@ package svc
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/poll"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 type AgentService struct {
 	Runner *cli.Runner
-	Poller *poll.Poller // nil in unit tests
+	Poller *poll.Poller    // nil in unit tests
+	Exec   vmexec.Executor // VM/docker reads (clone config reconstruction)
 }
 
 func (s *AgentService) ctx() (context.Context, context.CancelFunc) {
@@ -106,6 +109,44 @@ func (s *AgentService) CostHistory(window string) (string, error) {
 
 func (s *AgentService) TemplateList() (string, error) { return s.run("template", "list") }
 
+// Clone spawns a fresh session with the same agent type, repos and SSH mode
+// as an existing container (config reconstructed from its env + labels).
+func (s *AgentService) Clone(name string) (string, error) {
+	if s.Exec == nil {
+		return "", fmt.Errorf("clone unavailable: no VM executor")
+	}
+	ctx, cancel := s.ctx()
+	defer cancel()
+	out, err := s.Exec.Run(ctx, "docker", "inspect", "--format",
+		`{{index .Config.Labels "safe-agentic.agent-type"}}|{{index .Config.Labels "safe-agentic.ssh"}}|{{range .Config.Env}}{{println .}}{{end}}`,
+		name)
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", name, err)
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 3)
+	if len(parts) < 3 {
+		return "", fmt.Errorf("unexpected inspect output for %s", name)
+	}
+	agentType, sshLabel := parts[0], parts[1]
+	var repos []string
+	for _, line := range strings.Split(parts[2], "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "REPOS="); ok && v != "" {
+			repos = strings.Fields(v)
+		}
+	}
+	args := []string{"spawn", agentType}
+	for _, r := range repos {
+		args = append(args, "--repo", r)
+	}
+	if sshLabel == "true" || sshLabel == "on" {
+		args = append(args, "--ssh")
+	} else {
+		args = append(args, "--no-ssh")
+	}
+	args = append(args, "--background")
+	return s.run(args...)
+}
+
 // ConfigSync pushes current host Claude settings into the container;
 // restart applies them immediately (the session resumes).
 func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
@@ -115,7 +156,7 @@ func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
 	}
 	return s.run(args...)
 }
-func (s *AgentService) VMStart() (string, error)      { return s.run("vm", "start") }
+func (s *AgentService) VMStart() (string, error) { return s.run("vm", "start") }
 
 func (s *AgentService) PipelineRun(file string) (string, error) {
 	return s.run("pipeline", file, "--background")

@@ -33,6 +33,14 @@ export function CheckpointRestore(name: string, ref: string): $CancellablePromis
 }
 
 /**
+ * Clone spawns a fresh session with the same agent type, repos and SSH mode
+ * as an existing container (config reconstructed from its env + labels).
+ */
+export function Clone(name: string): $CancellablePromise<string> {
+    return $Call.ByID(2001323193, name);
+}
+
+/**
  * ConfigSync pushes current host Claude settings into the container;
  * restart applies them immediately (the session resumes).
  */

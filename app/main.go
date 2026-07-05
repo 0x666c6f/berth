@@ -113,7 +113,7 @@ func main() {
 	stateSvc := state.NewService()
 	watcher := watch.NewWatcher(config.EventsPath(), em, 5*time.Second)
 
-	agentSvc := &svc.AgentService{Runner: runner, Poller: poller}
+	agentSvc := &svc.AgentService{Runner: runner, Poller: poller, Exec: exec}
 	termSvc := &svc.TerminalService{Manager: termMgr}
 
 	app := application.New(application.Options{

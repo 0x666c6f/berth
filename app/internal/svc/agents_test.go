@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 func recorderRunner() (*cli.Runner, *[][]string) {
@@ -76,5 +77,21 @@ func TestSpawnArgsSanitizesName(t *testing.T) {
 	}
 	if got := strings.Join(spawnArgs(SpawnRequest{Agent: "claude", Name: "  !!  "}), " "); got != "spawn claude --background" {
 		t.Fatalf("all-invalid name must be dropped: %q", got)
+	}
+}
+
+func TestCloneReconstructsSpawn(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker inspect",
+		"claude|true|PATH=/usr/bin\nREPOS=git@github.com:o/r.git https://github.com/o/x.git\nHOME=/home/agent\n")
+	r, calls := recorderRunner()
+	s := &AgentService{Runner: r, Exec: fake}
+	if _, err := s.Clone("agent-claude-orig"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join((*calls)[0], " ")
+	want := "safe-ag spawn claude --repo git@github.com:o/r.git --repo https://github.com/o/x.git --ssh --background"
+	if got != want {
+		t.Fatalf("\ngot:  %s\nwant: %s", got, want)
 	}
 }
