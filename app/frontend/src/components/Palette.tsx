@@ -6,7 +6,7 @@ import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/ap
 
 export function Palette() {
   const [open, setOpen] = useState(false);
-  const { agents, select, setView, toast } = useStore();
+  const { agents, select, setView, setTab, selected, toast } = useStore();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -22,7 +22,16 @@ export function Palette() {
   const run = (label: string, p: Promise<unknown>) =>
     p.then(() => toast(`${label}: ok`)).catch((e: unknown) => toast(errText("action", e)));
 
+  const sel = selected?.replace(/^agent-/, "");
+  const selActions: [string, () => void][] = selected ? [
+    [`Terminal: ${sel}`, () => { setView("agents"); setTab("terminal"); }],
+    [`Diff: ${sel}`, () => { setView("agents"); setTab("diff"); }],
+    [`Steer: ${sel}`, () => { setView("agents"); setTab("output"); }],
+    [`Clone: ${sel}`, () => run(`clone ${sel}`, AgentService.Clone(selected))],
+    [`Stop: ${sel}`, () => run(`stop ${sel}`, AgentService.Stop(selected))],
+  ] : [];
   const actions: [string, () => void][] = [
+    ...selActions,
     ["Spawn agent", () => setView("spawn")],
     ["Fleet view", () => setView("fleet")],
     ["Timeline", () => setView("timeline")],

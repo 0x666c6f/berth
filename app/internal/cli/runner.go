@@ -54,9 +54,11 @@ func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 type OutputInfo struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	LastOutput string `json:"last_output"`
+	Name       string   `json:"name"`
+	Status     string   `json:"status"`
+	LastOutput string   `json:"last_output"`
+	Files      []string `json:"files"`
+	Commits    []string `json:"commits"`
 }
 
 func (r *Runner) Output(ctx context.Context, name string) (OutputInfo, error) {

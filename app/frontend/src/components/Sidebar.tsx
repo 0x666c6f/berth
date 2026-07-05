@@ -64,10 +64,16 @@ function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: num
       <button
         onClick={() => { select(a.Name); setView("agents"); }}
         title={[a.Repo, a.StateReason || a.Status].filter(Boolean).join(" — ")}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="min-w-0 flex-1 text-left"
       >
-        <StatusDot status={st} />
-        <span className="truncate">{a.Name.replace(/^agent-/, "")}</span>
+        <span className="flex items-center gap-2">
+          <StatusDot status={st} />
+          <span className="truncate">{a.Name.replace(/^agent-/, "")}</span>
+        </span>
+        <span className={`block truncate pl-4 text-xs ${st === "needs-you" ? "text-yellow-400" : "text-neutral-500"}`}>
+          {[a.Repo, st === "needs-you" ? (a.StateReason || "needs you") : a.Status]
+            .filter(Boolean).join(" · ")}
+        </span>
       </button>
       <span className="text-xs text-neutral-500 group-hover:hidden">{a.Type}</span>
       <button

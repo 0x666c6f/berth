@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { SearchAddon } from "@xterm/addon-search";
 import { Events } from "@wailsio/runtime";
 import { TerminalService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { errText } from "../types";
@@ -13,19 +14,36 @@ const unwrap = (e: any) => e?.data;
 
 export function TerminalPane({ container }: { container: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
+  const xtermRef = useRef<Terminal | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (!ref.current) return;
     setError("");
     const xterm = new Terminal({ fontSize: 13, fontFamily: "Menlo, monospace", scrollback: 10000 });
+    xtermRef.current = xterm;
     const fit = new FitAddon();
+    const search = new SearchAddon();
+    searchRef.current = search;
     xterm.loadAddon(fit);
+    xterm.loadAddon(search);
     xterm.open(ref.current);
     try { xterm.loadAddon(new WebglAddon()); } catch { /* canvas fallback */ }
     fit.fit();
     xterm.writeln(`\x1b[90mattaching to ${container}…\x1b[0m`);
+
+    // ⌘F opens search while the terminal has focus.
+    xterm.attachCustomKeyEventHandler((e) => {
+      if (e.type === "keydown" && e.metaKey && e.key === "f") {
+        setSearchOpen(true);
+        return false;
+      }
+      return true;
+    });
 
     let id: string | null = null;
     let offData = () => {};
@@ -40,6 +58,7 @@ export function TerminalPane({ container }: { container: string }) {
         offExit = Events.On(`term:exit:${tid}`, () =>
           xterm.writeln("\r\n\x1b[33m[disconnected — press ⟳ Reattach]\x1b[0m"));
         TerminalService.Resize(tid, xterm.cols, xterm.rows);
+        xterm.focus();
       })
       .catch((e: unknown) => setError(errText(`attach ${container}`, e)));
 
@@ -57,23 +76,43 @@ export function TerminalPane({ container }: { container: string }) {
       offData(); offExit();
       if (id) TerminalService.Close(id);
       xterm.dispose();
+      xtermRef.current = null;
     };
   }, [container, attempt]);
 
   return (
     <div className="relative h-full w-full">
       <div ref={ref} className="h-full w-full" />
+      {searchOpen && (
+        <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded bg-neutral-800 p-1 shadow-lg">
+          <input
+            autoFocus
+            className="input w-48 text-xs"
+            placeholder="search (Enter/⇧Enter)"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); searchRef.current?.findNext(e.target.value); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.shiftKey) searchRef.current?.findPrevious(query);
+              else if (e.key === "Enter") searchRef.current?.findNext(query);
+              else if (e.key === "Escape") { setSearchOpen(false); xtermRef.current?.focus(); }
+            }}
+          />
+          <button className="btn" onClick={() => { setSearchOpen(false); xtermRef.current?.focus(); }}>✕</button>
+        </div>
+      )}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-neutral-950/90 p-6">
           <pre className="max-w-xl whitespace-pre-wrap rounded border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{error}</pre>
           <button className="btn" onClick={() => setAttempt((n) => n + 1)}>⟳ Reattach</button>
         </div>
       )}
-      <button
-        className="btn absolute right-2 top-2 opacity-60 hover:opacity-100"
-        title="Reattach"
-        onClick={() => setAttempt((n) => n + 1)}
-      >⟳</button>
+      {!searchOpen && (
+        <button
+          className="btn absolute right-2 top-2 opacity-60 hover:opacity-100"
+          title="Reattach"
+          onClick={() => setAttempt((n) => n + 1)}
+        >⟳</button>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ export interface Agent {
 }
 export type AgentStatus = "working" | "needs-you" | "idle" | "review" | "failed" | "stopped";
 export type View = "agents" | "fleet" | "timeline" | "cost" | "spawn";
+export type Tab = "terminal" | "diff" | "output" | "info";
 
 // Human-readable error text: Wails binding rejections are Error objects whose
 // message carries the Go error string; bare String() yields just "Error".

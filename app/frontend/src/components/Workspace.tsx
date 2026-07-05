@@ -1,22 +1,28 @@
-import { useState } from "react";
 import { useStore } from "../store";
 import { TerminalPane } from "./TerminalPane";
 import { OutputTab } from "./OutputTab";
 import { InfoTab } from "./InfoTab";
 import { DiffTab } from "./DiffTab";
+import type { Tab } from "../types";
 
-type Tab = "terminal" | "diff" | "output" | "info";
 const TABS: Tab[] = ["terminal", "diff", "output", "info"];
 
 export function Workspace({ name }: { name: string }) {
-  const { split, setSplit, agents } = useStore();
+  const { split, setSplit, agents, tab, setTab } = useStore();
   const me = agents.find((a) => a.Name === name);
-  // Stopped agents default to Output (attach would fail); running to Terminal.
-  const [tab, setTab] = useState<Tab>(me?.Running ? "terminal" : "output");
   const others = agents.filter((a) => a.Running && a.Name !== name);
+  const blocked = me?.Running && me.State === "blocked";
 
   return (
     <div className="flex h-full flex-col">
+      {blocked && tab !== "terminal" && (
+        <div className="flex items-center gap-3 bg-yellow-900/60 px-4 py-2 text-sm text-yellow-100">
+          <span className="truncate">🟡 {me!.StateReason || "agent is waiting for you"}</span>
+          <button className="btn shrink-0 bg-yellow-700 hover:bg-yellow-600" onClick={() => setTab("terminal")}>
+            Respond in terminal
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-1 border-b border-neutral-800 px-2 py-1.5">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)}

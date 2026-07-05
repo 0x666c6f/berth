@@ -83,6 +83,16 @@ func (s *AgentService) WorkspaceRevert(name string) error {
 	return err
 }
 
+func (s *AgentService) WorkspaceStagePath(name, path string) error {
+	_, err := s.run("workspace", "stage", name, path)
+	return err
+}
+
+func (s *AgentService) WorkspaceRevertPath(name, path string) error {
+	_, err := s.run("workspace", "revert", name, path, "--yes")
+	return err
+}
+
 func (s *AgentService) CheckpointList(name string) (string, error) {
 	return s.run("checkpoint", "list", name)
 }

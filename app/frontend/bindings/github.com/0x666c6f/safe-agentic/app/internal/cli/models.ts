@@ -5,4 +5,6 @@ export interface OutputInfo {
     "name": string;
     "status": string;
     "last_output": string;
+    "files": string[] | null;
+    "commits": string[] | null;
 }

@@ -108,10 +108,18 @@ export function WorkspaceRevert(name: string): $CancellablePromise<void> {
     return $Call.ByID(1836280415, name);
 }
 
+export function WorkspaceRevertPath(name: string, path: string): $CancellablePromise<void> {
+    return $Call.ByID(2651970552, name, path);
+}
+
 /**
  * Stage/Revert operate on the whole workspace: the CLI requires explicit
  * paths ("." = everything).
  */
 export function WorkspaceStage(name: string): $CancellablePromise<void> {
     return $Call.ByID(2028950633, name);
+}
+
+export function WorkspaceStagePath(name: string, path: string): $CancellablePromise<void> {
+    return $Call.ByID(1976009906, name, path);
 }
