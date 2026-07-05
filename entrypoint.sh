@@ -87,7 +87,9 @@ ensure_claude_config() {
   fi
 
   if [ -n "${SAFE_AGENTIC_CLAUDE_CONFIG_B64:-}" ]; then
-    [ -f "$claude_config" ] && return 0
+    # Host settings.json is the source of truth: refresh on EVERY start so
+    # reused auth volumes pick up current preferences (output style, hooks,
+    # statusline). Auth (.claude.json / credentials) stays seed-only above.
     echo "$SAFE_AGENTIC_CLAUDE_CONFIG_B64" | base64 -d > "$claude_config" 2>/dev/null || true
     return 0
   fi
