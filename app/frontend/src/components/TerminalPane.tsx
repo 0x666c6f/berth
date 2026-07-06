@@ -3,7 +3,7 @@ import { RotateCw, X } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
-import { Events } from "@wailsio/runtime";
+import { Clipboard, Events } from "@wailsio/runtime";
 import { TerminalService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import { errText } from "../types";
 import "@xterm/xterm/css/xterm.css";
@@ -36,6 +36,17 @@ export function TerminalPane({ container }: { container: string }) {
     // smeared glyphs). The DOM renderer is correct and fast enough here.
     fit.fit();
     xterm.writeln(`\x1b[90mattaching to ${container}…\x1b[0m`);
+
+    // tmux copy-mode (`set-clipboard external`) delivers copies as OSC 52 with
+    // a base64 payload; xterm has no built-in handler, so route it to the
+    // macOS clipboard — this is what makes drag-select + y in tmux copyable.
+    const osc52 = xterm.parser.registerOscHandler(52, (data) => {
+      const b64 = data.replace(/^[^;]*;/, "");
+      if (b64 && b64 !== "?") {
+        Clipboard.SetText(new TextDecoder().decode(b64ToBytes(b64))).catch(() => {});
+      }
+      return true;
+    });
 
     // ⌘F opens search while the terminal has focus.
     xterm.attachCustomKeyEventHandler((e) => {
@@ -82,6 +93,7 @@ export function TerminalPane({ container }: { container: string }) {
     return () => {
       disposed = true;
       ro.disconnect();
+      osc52.dispose();
       onData.dispose();
       offData(); offExit();
       if (id) TerminalService.Close(id);

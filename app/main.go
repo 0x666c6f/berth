@@ -219,13 +219,29 @@ func main() {
 	}
 
 	// Stock menu plus File → New Window, which makes the app multi-window.
+	// The Edit menu is hand-built: Wails alpha's EditMenu role items are empty
+	// stubs on darwin, so they swallow ⌘C/⌘V app-wide while doing nothing.
+	// Wiring each item to the native selector restores clipboard everywhere
+	// (inputs and the terminal).
 	appMenu := application.NewMenu()
 	appMenu.AddRole(application.AppMenu)
 	fileMenu := appMenu.AddSubmenu("File")
 	fileMenu.Add("New Window").SetAccelerator("CmdOrCtrl+N").
 		OnClick(func(*application.Context) { newWindow() })
 	fileMenu.AddRole(application.CloseWindow)
-	appMenu.AddRole(application.EditMenu)
+	editMenu := appMenu.AddSubmenu("Edit")
+	for _, it := range []struct{ label, accel, sel string }{
+		{"Undo", "CmdOrCtrl+z", "undo:"},
+		{"Redo", "CmdOrCtrl+Shift+z", "redo:"},
+		{"Cut", "CmdOrCtrl+x", "cut:"},
+		{"Copy", "CmdOrCtrl+c", "copy:"},
+		{"Paste", "CmdOrCtrl+v", "paste:"},
+		{"Select All", "CmdOrCtrl+a", "selectAll:"},
+	} {
+		sel := it.sel
+		editMenu.Add(it.label).SetAccelerator(it.accel).
+			OnClick(func(*application.Context) { sendEditAction(sel) })
+	}
 	appMenu.AddRole(application.ViewMenu)
 	appMenu.AddRole(application.WindowMenu)
 	appMenu.AddRole(application.HelpMenu)
