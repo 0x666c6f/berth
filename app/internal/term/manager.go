@@ -1,17 +1,14 @@
 package term
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/creack/pty"
 
@@ -58,7 +55,6 @@ type session struct {
 type Manager struct {
 	em      emit.Emitter
 	factory CommandFactory
-	vmName  string
 	mu      sync.Mutex
 	seq     atomic.Int64
 	byID    map[string]*session
@@ -68,7 +64,7 @@ func NewManager(em emit.Emitter, factory CommandFactory) *Manager {
 	if factory == nil {
 		factory = DefaultFactory(vmNameFromEnv())
 	}
-	return &Manager{em: em, factory: factory, vmName: vmNameFromEnv(), byID: map[string]*session{}}
+	return &Manager{em: em, factory: factory, byID: map[string]*session{}}
 }
 
 func (m *Manager) Open(container string, cols, rows int) (string, error) {
@@ -88,7 +84,6 @@ func (m *Manager) Open(container string, cols, rows int) (string, error) {
 	m.mu.Lock()
 	m.byID[id] = &session{ptmx: ptmx, cmd: cmd, container: container}
 	m.mu.Unlock()
-	go m.forceTmuxSize(container, cols, rows)
 
 	go func() {
 		buf := make([]byte, 32*1024)
@@ -134,29 +129,11 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 	if err != nil {
 		return err
 	}
-	if err := pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil {
-		return err
-	}
-	// SIGWINCH doesn't reliably survive the container-machine relay, so the
-	// PTY resize above may not reach tmux — it would keep drawing at its
-	// creation size and garble. Force the window size directly (tmux.conf
-	// sets window-size manual so this sticks). Best-effort, off the hot path.
-	if cols > 0 && rows > 0 {
-		go m.forceTmuxSize(s.container, cols, rows)
-	}
-	return nil
-}
-
-func (m *Manager) forceTmuxSize(container string, cols, rows int) {
-	if container == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// All single-token args — no bash -c — so the relay can't split them.
-	_ = exec.CommandContext(ctx, "container", "machine", "run", "-n", m.vmName, "-u", "root",
-		"docker", "exec", container, "tmux", "resize-window", "-t", tmux.SessionName(),
-		"-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)).Run()
+	// SIGWINCH propagates through the container-machine relay to tmux (verified),
+	// so a plain PTY resize is enough — tmux (window-size latest) follows the
+	// client and codex repaints. Do NOT force the tmux window size here: that
+	// ignores the 1-row status bar and fights the client, garbling the display.
+	return pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
 func (m *Manager) Close(id string) error {
