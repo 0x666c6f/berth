@@ -1,7 +1,9 @@
 package term
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -55,6 +58,7 @@ type session struct {
 type Manager struct {
 	em      emit.Emitter
 	factory CommandFactory
+	vmName  string
 	mu      sync.Mutex
 	seq     atomic.Int64
 	byID    map[string]*session
@@ -64,13 +68,41 @@ func NewManager(em emit.Emitter, factory CommandFactory) *Manager {
 	if factory == nil {
 		factory = DefaultFactory(vmNameFromEnv())
 	}
-	return &Manager{em: em, factory: factory, byID: map[string]*session{}}
+	return &Manager{em: em, factory: factory, vmName: vmNameFromEnv(), byID: map[string]*session{}}
+}
+
+// waitForSession polls until the container's tmux session exists, so attaching
+// to a still-starting agent (cloning a large repo before it launches the agent
+// in tmux) shows "attaching…" until ready instead of failing with "no sessions".
+// It bails immediately if the container is absent or the relay is unavailable —
+// only a genuinely-still-starting container (exists, no tmux server yet) is
+// worth waiting on.
+func (m *Manager) waitForSession(container string) {
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// single-token args — survives the container-machine relay
+		out, err := exec.CommandContext(ctx, "container", "machine", "run", "-n", m.vmName, "-u", "root",
+			"docker", "exec", container, "tmux", "has-session", "-t", tmux.SessionName()).CombinedOutput()
+		cancel()
+		if err == nil {
+			return // session is up
+		}
+		s := string(out)
+		if errors.Is(err, exec.ErrNotFound) ||
+			strings.Contains(s, "No such container") ||
+			strings.Contains(s, "is not running") {
+			return // nothing to wait for — let the attach surface the real error
+		}
+		time.Sleep(1500 * time.Millisecond)
+	}
 }
 
 func (m *Manager) Open(container string, cols, rows int) (string, error) {
 	if cols <= 0 || rows <= 0 {
 		cols, rows = 120, 40
 	}
+	m.waitForSession(container)
 	cmd := m.factory(container)
 	// Start the PTY at the real xterm size so `tmux attach` renders at the
 	// right dimensions from the first frame — SIGWINCH from a later resize

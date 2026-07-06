@@ -57,6 +57,13 @@ export function TerminalPane({ container }: { container: string }) {
       .then((tid: string) => {
         if (disposed) { TerminalService.Close(tid); return; }
         id = tid;
+        // Reconcile: the ResizeObserver may have re-fitted the grid to a
+        // narrower size while Open was in flight (IPC round-trip) but couldn't
+        // resize the PTY yet (id was still null). Push the settled grid size
+        // now so the agent's terminal width matches what's actually rendered —
+        // otherwise a stale wider size leaks through and status lines overflow.
+        fit.fit();
+        TerminalService.Resize(tid, xterm.cols, xterm.rows);
         offData = Events.On(`term:data:${tid}`, (e: any) => xterm.write(b64ToBytes(unwrap(e))));
         offExit = Events.On(`term:exit:${tid}`, () =>
           xterm.writeln("\r\n\x1b[33m[disconnected — press ⟳ Reattach]\x1b[0m"));
