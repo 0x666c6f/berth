@@ -120,7 +120,8 @@ func main() {
 	stateSvc := state.NewService()
 	watcher := watch.NewWatcher(config.EventsPath(), em, 5*time.Second)
 
-	agentSvc := &svc.AgentService{Runner: runner, Poller: poller, Exec: exec}
+	agentSvc := &svc.AgentService{Runner: runner, Poller: poller, Exec: exec,
+		State: stateSvc, VMName: vmName()}
 	termSvc := &svc.TerminalService{Manager: termMgr}
 	dockSvc := dock.New()
 
@@ -140,6 +141,14 @@ func main() {
 		},
 	})
 	em.set(app)
+
+	// Native folder picker for "spawn from local folder".
+	agentSvc.PickDir = func() (string, error) {
+		return app.Dialog.OpenFile().
+			CanChooseFiles(false).
+			CanChooseDirectories(true).
+			PromptForSingleSelection()
+	}
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "safe-ag",

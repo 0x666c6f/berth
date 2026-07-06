@@ -110,9 +110,9 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-64 flex-col border-r border-neutral-800 bg-neutral-900 text-neutral-200">
       <div className="flex flex-wrap gap-1 p-2">
-        <NavBtn v="agents" label="Agents" /><NavBtn v="fleet" label="Fleet" />
-        <NavBtn v="timeline" label="Timeline" /><NavBtn v="cost" label="Cost" />
-        <NavBtn v="spawn" label="+ Spawn" />
+        <NavBtn v="agents" label="Agents" /><NavBtn v="projects" label="Projects" />
+        <NavBtn v="fleet" label="Fleet" /><NavBtn v="timeline" label="Timeline" />
+        <NavBtn v="cost" label="Cost" /><NavBtn v="spawn" label="+ Spawn" />
       </div>
       <div className="flex-1 overflow-y-auto">
         {[...fleets.entries()].map(([name, list]) => (

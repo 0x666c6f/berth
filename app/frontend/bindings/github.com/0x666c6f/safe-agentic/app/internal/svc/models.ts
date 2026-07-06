@@ -19,4 +19,5 @@ export interface SpawnRequest {
     "ReuseAuth": boolean;
     "Worktree": boolean;
     "DryRun": boolean;
+    "NoSeedAuth": boolean;
 }

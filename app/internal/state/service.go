@@ -141,6 +141,23 @@ func (s *Service) Projects() []Project {
 	return list
 }
 
+// ProjectAdd registers a project without counting a use (idempotent).
+func (s *Service) ProjectAdd(url string) error {
+	u := strings.TrimSpace(url)
+	if u == "" {
+		return nil
+	}
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	list := s.loadProjects()
+	for _, p := range list {
+		if p.URL == u {
+			return nil
+		}
+	}
+	return s.saveProjects(append(list, Project{URL: u, Last: time.Now().Unix()}))
+}
+
 // ProjectUse bumps the use count, adding the repo if new.
 func (s *Service) ProjectUse(url string) error {
 	u := strings.TrimSpace(url)

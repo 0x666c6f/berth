@@ -23,6 +23,7 @@ export function EmptyState() {
       <div className="text-lg text-neutral-300">No chat selected</div>
       <div className="flex gap-2">
         <button className="btn bg-green-800 hover:bg-green-700" onClick={() => setView("spawn")}>+ New chat</button>
+        <button className="btn" onClick={() => setView("projects")}>Projects & local folders</button>
         <button className="btn" onClick={() => setView("fleet")}>Run a pipeline</button>
       </div>
       {repos.length > 0 && (

@@ -41,6 +41,15 @@ export function Clone(name: string): $CancellablePromise<string> {
 }
 
 /**
+ * CloneLocalFolder streams a host directory into <container>:/workspace/<base>
+ * as a gzip tar over `container machine run -i … docker exec -i` (same stdin
+ * relay the setup build-context sync uses). Skips .git and heavy build dirs.
+ */
+export function CloneLocalFolder(container: string, localPath: string): $CancellablePromise<void> {
+    return $Call.ByID(1573691384, container, localPath);
+}
+
+/**
  * ConfigSync pushes current host Claude settings into the container;
  * restart applies them immediately (the session resumes).
  */
@@ -68,6 +77,13 @@ export function PR(name: string): $CancellablePromise<void> {
     return $Call.ByID(1098575466, name);
 }
 
+/**
+ * PickFolder opens the native directory picker (wired to Wails in main).
+ */
+export function PickFolder(): $CancellablePromise<string> {
+    return $Call.ByID(86929653);
+}
+
 export function PipelineRun(file: string): $CancellablePromise<string> {
     return $Call.ByID(2852768419, file);
 }
@@ -86,6 +102,14 @@ export function Review(name: string): $CancellablePromise<void> {
 
 export function Spawn(req: $models.SpawnRequest): $CancellablePromise<string> {
     return $Call.ByID(3528838075, req);
+}
+
+/**
+ * SpawnFromLocal spawns a blank-workspace agent and streams a local folder
+ * into it, so the agent works on a copy of a laptop directory (no git URL).
+ */
+export function SpawnFromLocal(agent: string, localPath: string): $CancellablePromise<string> {
+    return $Call.ByID(1432195030, agent, localPath);
 }
 
 export function Steer(name: string, message: string): $CancellablePromise<void> {

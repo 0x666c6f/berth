@@ -6,7 +6,7 @@ export interface Agent {
   SSH: string; Auth: string; GHAuth: string; Docker: string; NetworkMode: string;
 }
 export type AgentStatus = "working" | "needs-you" | "idle" | "review" | "failed" | "stopped";
-export type View = "agents" | "fleet" | "timeline" | "cost" | "spawn";
+export type View = "agents" | "projects" | "fleet" | "timeline" | "cost" | "spawn";
 export type Tab = "terminal" | "diff" | "output" | "info";
 
 // Human-readable error text: Wails binding rejections are Error objects whose

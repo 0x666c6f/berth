@@ -29,6 +29,13 @@ export function PipelineFiles(): $CancellablePromise<string[] | null> {
     return $Call.ByID(2603917901);
 }
 
+/**
+ * ProjectAdd registers a project without counting a use (idempotent).
+ */
+export function ProjectAdd(url: string): $CancellablePromise<void> {
+    return $Call.ByID(3784048056, url);
+}
+
 export function ProjectRemove(url: string): $CancellablePromise<void> {
     return $Call.ByID(3307348241, url);
 }

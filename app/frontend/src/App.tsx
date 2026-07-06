@@ -4,6 +4,7 @@ import { useStore, orderAgents } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { Workspace } from "./components/Workspace";
 import { SpawnForm } from "./components/SpawnForm";
+import { ProjectsView } from "./components/ProjectsView";
 import { FleetView } from "./components/FleetView";
 import { Timeline } from "./components/Timeline";
 import { CostView } from "./components/CostView";
@@ -93,6 +94,7 @@ export default function App() {
             ? <Workspace key={selected} name={selected} />
             : <EmptyState />)}
           {view === "spawn" && <SpawnForm />}
+          {view === "projects" && <ProjectsView />}
           {view === "fleet" && <FleetView />}
           {view === "timeline" && <Timeline />}
           {view === "cost" && <CostView />}

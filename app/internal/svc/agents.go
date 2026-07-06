@@ -9,13 +9,17 @@ import (
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/poll"
+	"github.com/0x666c6f/safe-agentic/app/internal/state"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
 type AgentService struct {
-	Runner *cli.Runner
-	Poller *poll.Poller    // nil in unit tests
-	Exec   vmexec.Executor // VM/docker reads (clone config reconstruction)
+	Runner  *cli.Runner
+	Poller  *poll.Poller    // nil in unit tests
+	Exec    vmexec.Executor // VM/docker reads (clone config reconstruction)
+	State   *state.Service  // projects store (nil in unit tests)
+	VMName  string          // for raw stdin-streaming commands
+	PickDir func() (string, error)
 }
 
 func (s *AgentService) ctx() (context.Context, context.CancelFunc) {
