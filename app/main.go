@@ -123,14 +123,16 @@ func main() {
 	agentSvc := &svc.AgentService{Runner: runner, Poller: poller, Exec: exec,
 		State: stateSvc, VMName: vmName()}
 	termSvc := &svc.TerminalService{Manager: termMgr}
+	quotaSvc := &svc.QuotaService{}
 	dockSvc := dock.New()
 
 	app := application.New(application.Options{
-		Name: "safe-ag-app",
+		Name: "Safe Agentic",
 		Services: []application.Service{
 			application.NewService(agentSvc),
 			application.NewService(termSvc),
 			application.NewService(stateSvc),
+			application.NewService(quotaSvc),
 			application.NewService(dockSvc),
 		},
 		Assets: application.AssetOptions{
@@ -151,7 +153,7 @@ func main() {
 	}
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "safe-ag",
+		Title:  "Safe Agentic",
 		Width:  1400,
 		Height: 900,
 		URL:    "/",
@@ -221,7 +223,7 @@ func main() {
 			em.Emit("focus.spawn", nil)
 		})
 		menu.AddSeparator()
-		menu.Add("Open safe-ag").OnClick(func(*application.Context) { win.Show(); win.Focus() })
+		menu.Add("Open Safe Agentic").OnClick(func(*application.Context) { win.Show(); win.Focus() })
 		menu.Add("Quit").OnClick(func(*application.Context) { app.Quit() })
 		tray.SetMenu(menu)
 	}

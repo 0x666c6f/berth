@@ -4,9 +4,11 @@
         <key>CFBundlePackageType</key>
             <string>APPL</string>
         <key>CFBundleName</key>
-            <string>My Product</string>
+            <string>Safe Agentic</string>
+        <key>CFBundleDisplayName</key>
+            <string>Safe Agentic</string>
         <key>CFBundleExecutable</key>
-            <string>safe-ag-app</string>
+            <string>Safe Agentic</string>
         <key>CFBundleIdentifier</key>
             <string>com.example.safeagapp</string>
         <key>CFBundleVersion</key>

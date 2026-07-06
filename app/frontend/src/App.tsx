@@ -51,7 +51,7 @@ export default function App() {
   // Window title: selected agent + needs-you count (helps ⌘Tab triage).
   useEffect(() => {
     const needs = agents.filter((a) => a.Running && (needsYou[a.Name] || a.State === "blocked")).length;
-    document.title = `safe-ag${selected ? " — " + selected.replace(/^agent-/, "") : ""}${needs ? ` (${needs} need you)` : ""}`;
+    document.title = `Safe Agentic${selected ? " — " + selected.replace(/^agent-/, "") : ""}${needs ? ` (${needs} need you)` : ""}`;
   }, [agents, needsYou, selected]);
 
   // Keyboard: j/k move selection, Enter/⌘1..9 jump, ⌘T/⌘D/⌘O/⌘I tabs.
