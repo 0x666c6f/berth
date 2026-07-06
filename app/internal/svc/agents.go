@@ -153,7 +153,7 @@ func (s *AgentService) Clone(name string) (string, error) {
 	} else {
 		args = append(args, "--no-ssh")
 	}
-	args = append(args, "--background")
+	args = append(args, "--seed-auth", "--background")
 	return s.run(args...)
 }
 
@@ -175,7 +175,7 @@ func (s *AgentService) PipelineRun(file string) (string, error) {
 type SpawnRequest struct {
 	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
 	MaxCost                                                    string // USD; engine kills the agent past this budget
-	SSH, ReuseAuth, Worktree, DryRun                           bool
+	SSH, ReuseAuth, Worktree, DryRun, NoSeedAuth               bool
 }
 
 // nameSanitize maps user-typed names onto the engine's allowed charset
@@ -201,6 +201,14 @@ func spawnArgs(req SpawnRequest) []string {
 	}
 	if req.ReuseAuth {
 		args = append(args, "--reuse-auth")
+	}
+	// Always seed the host's current Claude/Codex login so GUI-spawned
+	// agents are logged in without an interactive login inside the
+	// container (personal tool on a trusted host). --no-seed-auth opts out.
+	if req.NoSeedAuth {
+		args = append(args, "--no-seed-auth")
+	} else {
+		args = append(args, "--seed-auth")
 	}
 	if req.Worktree {
 		args = append(args, "--worktree")

@@ -672,6 +672,8 @@ func appendHostConfig(cmd *docker.DockerRunCmd, opts SpawnOpts) {
 		envs, err := inject.ReadClaudeConfig(claudeDir)
 		appendEnvMap(cmd, envs, err)
 		if opts.SeedAuth {
+			envs, err = inject.ReadClaudeCredentialsFile(claudeDir)
+			appendEnvMap(cmd, envs, err)
 			envs, err = inject.ReadClaudeOAuthToken()
 			appendEnvMap(cmd, envs, err)
 			envs, err = inject.ReadClaudeAuth(os.Getenv("HOME"))

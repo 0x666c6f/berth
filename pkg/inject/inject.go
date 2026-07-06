@@ -69,6 +69,20 @@ func ReadClaudeAuth(homeDir string) (map[string]string, error) {
 	return envs, nil
 }
 
+// ReadClaudeCredentialsFile reads ~/.claude/.credentials.json (the live OAuth
+// credential store) and returns it as SAFE_AGENTIC_CLAUDE_CREDS_B64. This is
+// the authoritative login for modern Claude Code; the keychain token below is
+// a fallback for hosts that store credentials only in the macOS keychain.
+func ReadClaudeCredentialsFile(configDir string) (map[string]string, error) {
+	envs := make(map[string]string)
+	data, err := os.ReadFile(filepath.Join(configDir, ".credentials.json"))
+	if err != nil {
+		return envs, nil
+	}
+	envs["SAFE_AGENTIC_CLAUDE_CREDS_B64"] = base64.StdEncoding.EncodeToString(data)
+	return envs, nil
+}
+
 func ReadClaudeOAuthToken() (map[string]string, error) {
 	envs := make(map[string]string)
 	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
@@ -76,35 +90,25 @@ func ReadClaudeOAuthToken() (map[string]string, error) {
 		return envs, nil
 	}
 
-	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-g")
-	out, err := cmd.CombinedOutput()
+	// -w prints the raw password to stdout with no escaping (the -g form
+	// hex-encodes JSON secrets, which broke extraction).
+	out, err := exec.Command("security", "find-generic-password",
+		"-s", "Claude Code-credentials", "-w").Output()
 	if err != nil {
 		return envs, nil
 	}
-
-	var secretLine string
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, `password: "`) {
-			secretLine = line
-			break
-		}
+	if accessToken := extractClaudeAccessToken(string(out)); accessToken != "" {
+		envs["CLAUDE_CODE_OAUTH_TOKEN"] = accessToken
 	}
-	if secretLine == "" {
-		return envs, nil
-	}
-
-	secret := strings.TrimPrefix(secretLine, `password: "`)
-	secret = strings.TrimSuffix(secret, `"`)
-
-	accessToken := extractClaudeAccessToken(secret)
-	if accessToken == "" {
-		return envs, nil
-	}
-	envs["CLAUDE_CODE_OAUTH_TOKEN"] = accessToken
 	return envs, nil
 }
 
 func extractClaudeAccessToken(secret string) string {
+	// Scope to claudeAiOauth so we don't grab an mcpOAuth server's token
+	// (the keychain blob holds both, MCP entries first).
+	if i := strings.Index(secret, `"claudeAiOauth"`); i != -1 {
+		secret = secret[i:]
+	}
 	const marker = `"accessToken":"`
 	start := strings.Index(secret, marker)
 	if start == -1 {

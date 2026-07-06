@@ -118,8 +118,15 @@ ensure_claude_auth() {
   local auth_path="$claude_dir/.claude.json"
   local tmp_auth=""
 
+  mkdir -p "$claude_dir" 2>/dev/null || true
+  # Live OAuth credentials: refresh on EVERY start so a re-logged-in host
+  # replaces an expired token in a reused-auth volume. This IS the login.
+  if [ -n "${SAFE_AGENTIC_CLAUDE_CREDS_B64:-}" ] && [ -w "$claude_dir" ]; then
+    echo "$SAFE_AGENTIC_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null \
+      && chmod 600 "$claude_dir/.credentials.json" 2>/dev/null || true
+  fi
+
   [ -n "${SAFE_AGENTIC_CLAUDE_AUTH_B64:-}" ] || return 0
-  mkdir -p "$claude_dir" 2>/dev/null || return 0
   [ -w "$claude_dir" ] || return 0
   [ -f "$auth_path" ] && return 0
   tmp_auth=$(mktemp) || return 0
