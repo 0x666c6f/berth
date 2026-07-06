@@ -157,7 +157,7 @@ func (s *AgentService) Clone(name string) (string, error) {
 	} else {
 		args = append(args, "--no-ssh")
 	}
-	args = append(args, "--seed-auth", "--reuse-gh-auth", "--background")
+	args = append(args, "--seed-auth", "--reuse-gh-auth", "--auto-trust", "--background")
 	return s.run(args...)
 }
 
@@ -232,6 +232,10 @@ func spawnArgs(req SpawnRequest) []string {
 	} else {
 		args = append(args, "--reuse-gh-auth")
 	}
+	// Auto-accept the agent's directory-trust prompt (the container IS the
+	// sandbox) so a GUI-spawned codex/claude lands in an interactive session
+	// instead of hanging at "Do you trust this directory?".
+	args = append(args, "--auto-trust")
 	if req.Worktree {
 		args = append(args, "--worktree")
 	}
