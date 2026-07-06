@@ -9,5 +9,6 @@ export {
 };
 
 export type {
+    PRInfo,
     SpawnRequest
 } from "./models.js";

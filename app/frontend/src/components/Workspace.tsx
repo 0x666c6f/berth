@@ -17,6 +17,7 @@ export function Workspace({ name }: { name: string }) {
   // Failed = stopped with a non-clean exit (State "exited", not "done").
   const failed = me && !me.Running && me.State === "exited";
   const [failReason, setFailReason] = useState("");
+  const [pr, setPr] = useState<{ url: string; number: number; state: string; title: string } | null>(null);
 
   useEffect(() => {
     if (!failed) { setFailReason(""); return; }
@@ -24,6 +25,20 @@ export function Workspace({ name }: { name: string }) {
       .then((i: any) => setFailReason((i?.last_output || "").trim().split("\n").slice(-3).join("\n")))
       .catch(() => {});
   }, [name, failed]);
+
+  // Look up an open PR for this agent's branch (gh in its workspace),
+  // re-checking so it appears once the agent creates one mid-session.
+  useEffect(() => {
+    setPr(null);
+    if (!me?.Running || !me.Repo) return;
+    let cancelled = false;
+    const check = () => AgentService.PRStatus(name, me.Repo!)
+      .then((p: any) => { if (!cancelled) setPr(p?.url ? p : null); })
+      .catch(() => {});
+    check();
+    const t = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [name, me?.Running, me?.Repo]);
 
   return (
     <div className="flex h-full flex-col">
@@ -56,6 +71,15 @@ export function Workspace({ name }: { name: string }) {
           <span className="ml-2 rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">
             stopped — {me.State || "exited"}
           </span>
+        )}
+        {pr && (
+          <button
+            className={`ml-2 flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${pr.state === "MERGED" ? "bg-purple-800 text-purple-100" : pr.state === "CLOSED" ? "bg-red-900 text-red-200" : "bg-green-800 text-green-100"} hover:brightness-125`}
+            title={`${pr.title} (${pr.state})`}
+            onClick={() => AgentService.OpenURL(pr.url).catch(() => {})}
+          >
+            PR #{pr.number} ↗
+          </button>
         )}
         <select
           className="ml-auto rounded bg-neutral-800 px-2 py-1 text-xs"

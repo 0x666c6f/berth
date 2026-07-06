@@ -69,12 +69,27 @@ export function Diff(name: string): $CancellablePromise<string> {
     return $Call.ByID(587789987, name);
 }
 
+/**
+ * OpenURL opens an http(s) URL in the host's default browser.
+ */
+export function OpenURL(url: string): $CancellablePromise<void> {
+    return $Call.ByID(2120322749, url);
+}
+
 export function Output(name: string): $CancellablePromise<cli$0.OutputInfo> {
     return $Call.ByID(1181229993, name);
 }
 
 export function PR(name: string): $CancellablePromise<void> {
     return $Call.ByID(1098575466, name);
+}
+
+/**
+ * PR looks up the PR for the agent's checked-out branch via gh in its
+ * workspace. Empty PRInfo (no error) when the agent has no repo/PR.
+ */
+export function PRStatus(name: string, repoDisplay: string): $CancellablePromise<$models.PRInfo> {
+    return $Call.ByID(3159238996, name, repoDisplay);
 }
 
 /**

@@ -2,7 +2,9 @@ package svc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -74,6 +76,46 @@ func (s *AgentService) Output(name string) (cli.OutputInfo, error) {
 }
 
 func (s *AgentService) Diff(name string) (string, error) { return s.run("diff", name) }
+
+// PRInfo is the open pull request for the agent's current branch, if any.
+type PRInfo struct {
+	URL    string `json:"url"`
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	Title  string `json:"title"`
+}
+
+// PR looks up the PR for the agent's checked-out branch via gh in its
+// workspace. Empty PRInfo (no error) when the agent has no repo/PR.
+func (s *AgentService) PRStatus(name, repoDisplay string) (PRInfo, error) {
+	var info PRInfo
+	if s.Exec == nil {
+		return info, nil
+	}
+	workdir := "/workspace"
+	if repoDisplay != "" {
+		workdir = "/workspace/" + repoDisplay
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// -w sets the workdir and --json takes a comma list — all single tokens,
+	// so no bash -c (which the container-machine relay would split on spaces).
+	out, err := s.Exec.Run(ctx, "docker", "exec", "-w", workdir, name,
+		"gh", "pr", "view", "--json", "url,number,state,title")
+	if err != nil {
+		return info, nil // no PR for this branch / not a repo
+	}
+	_ = json.Unmarshal(out, &info)
+	return info, nil
+}
+
+// OpenURL opens an http(s) URL in the host's default browser.
+func (s *AgentService) OpenURL(url string) error {
+	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
+		return fmt.Errorf("refusing to open non-http url")
+	}
+	return exec.Command("open", url).Start()
+}
 
 // Stage/Revert operate on the whole workspace: the CLI requires explicit
 // paths ("." = everything).
