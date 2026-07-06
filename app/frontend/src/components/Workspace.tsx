@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CircleAlert, CircleX, ExternalLink, X } from "lucide-react";
 import { useStore } from "../store";
 import { TerminalPane } from "./TerminalPane";
 import { OutputTab } from "./OutputTab";
@@ -45,7 +46,7 @@ export function Workspace({ name }: { name: string }) {
     <div className="flex h-full flex-col">
       {failed && (
         <div className="flex items-start gap-3 bg-red-950/70 px-4 py-2 text-sm text-red-100">
-          <span className="shrink-0 font-medium">✕ failed to start</span>
+          <span className="flex shrink-0 items-center gap-1 font-medium"><CircleX className="h-4 w-4" /> failed to start</span>
           <span className="min-w-0 flex-1 whitespace-pre-wrap font-mono text-xs text-red-200">{failReason || me!.Status}</span>
           <button className="btn shrink-0" onClick={() => run("Retrying agent", AgentService.Retry(name, ""))}>
             Retry
@@ -54,7 +55,8 @@ export function Workspace({ name }: { name: string }) {
       )}
       {blocked && tab !== "terminal" && (
         <div className="flex items-center gap-3 bg-yellow-900/60 px-4 py-2 text-sm text-yellow-100">
-          <span className="truncate">🟡 {me!.StateReason || "agent is waiting for you"}</span>
+          <CircleAlert className="h-4 w-4 shrink-0 text-yellow-400" />
+          <span className="truncate">{me!.StateReason || "agent is waiting for you"}</span>
           <button className="btn shrink-0 bg-yellow-700 hover:bg-yellow-600" onClick={() => setTab("terminal")}>
             Respond in terminal
           </button>
@@ -78,7 +80,7 @@ export function Workspace({ name }: { name: string }) {
             title={`${pr.title} (${pr.state})`}
             onClick={() => AgentService.OpenURL(pr.url).catch(() => {})}
           >
-            PR #{pr.number} ↗
+            PR #{pr.number} <ExternalLink className="h-3 w-3" />
           </button>
         )}
         {others.length > 0 && (
@@ -107,7 +109,7 @@ export function Workspace({ name }: { name: string }) {
           <div key={n} className="flex min-w-0 flex-1 flex-col border-l border-neutral-800">
             <div className="flex items-center justify-between border-b border-neutral-800 px-2 py-1 text-xs text-neutral-400">
               <span className="truncate">{n.replace(/^agent-/, "")}</span>
-              <button className="hover:text-neutral-100" title="Close split" onClick={() => toggleSplit(n)}>✕</button>
+              <button className="hover:text-neutral-100" title="Close split" onClick={() => toggleSplit(n)}><X className="h-3.5 w-3.5" /></button>
             </div>
             <div className="min-h-0 flex-1">
               <TerminalPane container={n} />

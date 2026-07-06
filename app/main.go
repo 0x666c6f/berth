@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"log"
 	"os"
 	"strconv"
@@ -87,19 +91,55 @@ func trayHeader(agents []poll.Agent, needsYou map[string]bool) string {
 	return fmt.Sprintf("%d working · %d need you · %d idle", working, needs, idle)
 }
 
-// chatMenuLine renders one chat row: status emoji + short name + state.
-func chatMenuLine(a poll.Agent, needsYou map[string]bool) string {
-	emoji, status := "⚪", "idle"
+// statusDot renders a small anti-aliased filled circle PNG for tray menu
+// items — native menus can't use the frontend's CSS dots, and emoji circles
+// look out of place. 14px point size = menu item image size (72 DPI PNG).
+func statusDot(c color.RGBA) []byte {
+	const size, radius = 14, 4.5
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			var cov float64 // 4×4 supersampled coverage for smooth edges
+			for sy := 0; sy < 4; sy++ {
+				for sx := 0; sx < 4; sx++ {
+					dx := float64(x) + (float64(sx)+0.5)/4 - size/2
+					dy := float64(y) + (float64(sy)+0.5)/4 - size/2
+					if dx*dx+dy*dy <= radius*radius {
+						cov++
+					}
+				}
+			}
+			a := uint8(cov / 16 * float64(c.A))
+			img.SetRGBA(x, y, color.RGBA{c.R, c.G, c.B, a})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil // SetBitmap(nil) is a no-op; the row just has no dot
+	}
+	return buf.Bytes()
+}
+
+// Tray status dots, matching the frontend StatusDot palette.
+var (
+	dotIdle    = statusDot(color.RGBA{115, 115, 115, 255}) // neutral-500
+	dotNeeds   = statusDot(color.RGBA{250, 204, 21, 255})  // yellow-400
+	dotWorking = statusDot(color.RGBA{34, 197, 94, 255})   // green-500
+)
+
+// chatMenuLine renders one chat row: short name + state, plus a status dot.
+func chatMenuLine(a poll.Agent, needsYou map[string]bool) (string, []byte) {
+	dot, status := dotIdle, "idle"
 	switch {
 	case needsYou[a.Name] || a.State == "blocked":
-		emoji, status = "🟡", "needs you"
+		dot, status = dotNeeds, "needs you"
 		if a.StateReason != "" {
 			status = a.StateReason
 		}
 	case a.Activity == "Working":
-		emoji, status = "🟢", "working"
+		dot, status = dotWorking, "working"
 	}
-	return fmt.Sprintf("%s %s — %s", emoji, strings.TrimPrefix(a.Name, "agent-"), status)
+	return fmt.Sprintf("%s — %s", strings.TrimPrefix(a.Name, "agent-"), status), dot
 }
 
 func vmName() string {
@@ -226,7 +266,8 @@ func main() {
 				continue
 			}
 			name := a.Name
-			menu.Add(chatMenuLine(a, needsYou)).OnClick(func(*application.Context) {
+			line, dot := chatMenuLine(a, needsYou)
+			menu.Add(line).SetBitmap(dot).OnClick(func(*application.Context) {
 				showApp()
 				em.Emit("focus.agent", name)
 			})
@@ -235,7 +276,7 @@ func main() {
 		menu.Add("Projects").SetEnabled(false)
 		for _, p := range stateSvc.Projects() {
 			url := p.URL
-			menu.Add("▶ " + state.ShortRepoName(url)).OnClick(func(*application.Context) {
+			menu.Add(state.ShortRepoName(url)).OnClick(func(*application.Context) {
 				go func() {
 					stateSvc.ProjectUse(url)
 					if _, err := agentSvc.Spawn(svc.SpawnRequest{Agent: "claude", Repo: url, SSH: true}); err != nil {

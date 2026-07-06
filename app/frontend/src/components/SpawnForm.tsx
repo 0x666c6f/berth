@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
+import { TriangleAlert, X } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
 import { recordRepoUse, topRepos, forgetRepo } from "../repoHistory";
@@ -73,7 +74,7 @@ export function SpawnForm() {
         onChange={(e) => set("Repo", e.target.value)} />
       {req.Repo.trim() && !/[/:.]/.test(req.Repo) && (
         <div className="text-xs text-yellow-500">
-          ⚠ "{req.Repo}" doesn't look like a repo URL — the agent will refuse to clone it. Leave empty for a blank workspace.
+          <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />"{req.Repo}" doesn't look like a repo URL — the agent will refuse to clone it. Leave empty for a blank workspace.
         </div>
       )}
       {savedRepos.length > 0 && (
@@ -85,7 +86,7 @@ export function SpawnForm() {
                 {r.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "")}
               </button>
               <button className="text-neutral-500 hover:text-red-400" title="forget"
-                onClick={() => forgetRepo(r).then(refreshRepos)}>✕</button>
+                onClick={() => forgetRepo(r).then(refreshRepos)}><X className="h-3 w-3" /></button>
             </span>
           ))}
         </div>

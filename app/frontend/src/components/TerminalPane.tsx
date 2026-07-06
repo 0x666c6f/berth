@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { RotateCw, X } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -106,13 +107,13 @@ export function TerminalPane({ container }: { container: string }) {
               else if (e.key === "Escape") { setSearchOpen(false); xtermRef.current?.focus(); }
             }}
           />
-          <button className="btn" onClick={() => { setSearchOpen(false); xtermRef.current?.focus(); }}>✕</button>
+          <button className="btn" onClick={() => { setSearchOpen(false); xtermRef.current?.focus(); }}><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-neutral-950/90 p-6">
           <pre className="max-w-xl whitespace-pre-wrap rounded border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{error}</pre>
-          <button className="btn" onClick={() => setAttempt((n) => n + 1)}>⟳ Reattach</button>
+          <button className="btn" onClick={() => setAttempt((n) => n + 1)}><RotateCw className="h-3.5 w-3.5" /> Reattach</button>
         </div>
       )}
       {!searchOpen && (
@@ -120,7 +121,7 @@ export function TerminalPane({ container }: { container: string }) {
           className="btn absolute right-2 top-2 opacity-60 hover:opacity-100"
           title="Reattach"
           onClick={() => setAttempt((n) => n + 1)}
-        >⟳</button>
+        ><RotateCw className="h-3.5 w-3.5" /></button>
       )}
     </div>
   );

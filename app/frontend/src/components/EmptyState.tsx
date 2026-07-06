@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Play } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
 import { topRepos } from "../repoHistory";
@@ -34,7 +35,7 @@ export function EmptyState() {
               onClick={() => AgentService.Spawn({ Agent: "claude", Repo: r, SSH: true } as any)
                 .then(() => toast(`spawning on ${r}`))
                 .catch((e: unknown) => toast(errText("spawn", e)))}>
-              ▶ {r.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "")}
+              <Play className="mr-1 inline h-2.5 w-2.5" />{r.replace(/^(git@github\.com:|https:\/\/github\.com\/)/, "").replace(/\.git$/, "")}
             </button>
           ))}
         </div>

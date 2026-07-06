@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Bell, Bot, CircleDollarSign, Ellipsis, FolderGit2, Workflow } from "lucide-react";
 import { useStore, statusFor } from "../store";
 import { StatusDot } from "./StatusDot";
 import { QuotaBar } from "./QuotaBar";
@@ -99,17 +100,17 @@ function Row({ a, openMenu }: { a: Agent; openMenu: (a: Agent, x: number, y: num
         className="rounded px-1 text-neutral-500 opacity-0 hover:bg-neutral-700 hover:text-neutral-200 group-hover:opacity-100"
         title="Actions"
         onClick={(e) => { e.stopPropagation(); const r = (e.target as HTMLElement).getBoundingClientRect(); openMenu(a, r.left, r.bottom + 4); }}
-      >⋯</button>
+      ><Ellipsis className="pointer-events-none h-4 w-4" /></button>
     </div>
   );
 }
 
-const NAV: { v: View; icon: string; label: string }[] = [
-  { v: "agents", icon: "◧", label: "Agents" },
-  { v: "projects", icon: "🗂", label: "Projects" },
-  { v: "fleet", icon: "🔀", label: "Pipelines" },
-  { v: "timeline", icon: "🔔", label: "Activity" },
-  { v: "cost", icon: "＄", label: "Cost" },
+const NAV: { v: View; icon: typeof Bot; label: string }[] = [
+  { v: "agents", icon: Bot, label: "Agents" },
+  { v: "projects", icon: FolderGit2, label: "Projects" },
+  { v: "fleet", icon: Workflow, label: "Pipelines" },
+  { v: "timeline", icon: Bell, label: "Activity" },
+  { v: "cost", icon: CircleDollarSign, label: "Cost" },
 ];
 
 export function Sidebar() {
@@ -157,7 +158,7 @@ export function Sidebar() {
         ))}
         {[...fleets.entries()].map(([name, list]) => (
           <div key={name}>
-            <SectionLabel>🔀 {name}</SectionLabel>
+            <SectionLabel><Workflow className="mr-1 inline h-3 w-3" />{name}</SectionLabel>
             {list.map((a) => <Row key={a.Name} a={a} openMenu={openMenu} />)}
           </div>
         ))}
@@ -177,14 +178,14 @@ export function Sidebar() {
 
       {/* Footer nav — secondary views */}
       <nav className="flex items-center justify-around border-t border-neutral-800 px-1 py-1.5">
-        {NAV.map(({ v, icon, label }) => (
+        {NAV.map(({ v, icon: Icon, label }) => (
           <button
             key={v}
             onClick={() => setView(v)}
             title={label}
             className={`flex flex-1 flex-col items-center gap-0.5 rounded-md py-1 text-[10px] transition-colors ${view === v ? "bg-neutral-800 text-neutral-100" : "text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-300"}`}
           >
-            <span className="text-sm leading-none">{icon}</span>
+            <Icon className="h-4 w-4" />
             {label}
           </button>
         ))}

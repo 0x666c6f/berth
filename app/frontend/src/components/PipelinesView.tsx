@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Layers, Play, Workflow, X } from "lucide-react";
 import { useStore, statusFor } from "../store";
 import { errText, type Agent } from "../types";
 import { StatusDot } from "./StatusDot";
@@ -38,7 +39,7 @@ function StepCard({ step, projects, canMoveUp, canMoveDown, onChange, onRemove, 
         </div>
         <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={!canMoveUp} onClick={() => onMoveStage(-1)} title="move to previous stage">⇞</button>
         <button className="px-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30" disabled={!canMoveDown} onClick={() => onMoveStage(1)} title="move to next stage">⇟</button>
-        <button className="px-1 text-neutral-500 hover:text-red-400" onClick={onRemove} title="remove step">✕</button>
+        <button className="px-1 text-neutral-500 hover:text-red-400" onClick={onRemove} title="remove step"><X className="h-3.5 w-3.5" /></button>
       </div>
       <div className="flex flex-col gap-2 p-3">
         {step.type !== "shell" && (
@@ -210,13 +211,13 @@ export function PipelinesView() {
               <span className="truncate text-sm font-semibold">{selected}{dirty ? " •" : ""}</span>
               {model && (
                 <button className="btn ml-2" onClick={() => { if (rawMode) { const p = parsePipeline(raw!); if (p) { setModel(p); setRawMode(false); } else toast("YAML uses advanced features — keep editing raw"); } else { setRaw(dumpPipeline(model)); setRawMode(true); } }}>
-                  {rawMode ? "◀ Form" : "YAML ▶"}
+                  {rawMode ? <><ChevronLeft className="h-3.5 w-3.5" /> Form</> : <>YAML <ChevronRight className="h-3.5 w-3.5" /></>}
                 </button>
               )}
               <button className="btn ml-auto" disabled={!dirty} onClick={save}>Save</button>
               <button className="btn" disabled={busy} onClick={() => run(true)}>Dry-run</button>
-              <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50" disabled={busy || dirty} title={dirty ? "save first" : ""} onClick={() => run(false)}>▶ Run</button>
-              <button className="px-1 text-neutral-500 hover:text-red-400" onClick={del} title="delete">✕</button>
+              <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50" disabled={busy || dirty} title={dirty ? "save first" : ""} onClick={() => run(false)}><Play className="h-3 w-3" /> Run</button>
+              <button className="px-1 text-neutral-500 hover:text-red-400" onClick={del} title="delete"><X className="h-3.5 w-3.5" /></button>
             </div>
 
             {detectedVars.length > 0 && (
@@ -233,7 +234,7 @@ export function PipelinesView() {
                         const parsed = parsePrUrl(val);
                         if (parsed) setVars((s) => ({ ...s, [prFill.repoVar]: parsed.repo, [prFill.prVar]: parsed.pr }));
                       }} />
-                    {prUrl && (parsePrUrl(prUrl) ? <span className="text-green-500">✓</span> : <span className="text-neutral-600">…</span>)}
+                    {prUrl && (parsePrUrl(prUrl) ? <Check className="h-3.5 w-3.5 text-green-500" /> : <span className="text-neutral-600">…</span>)}
                   </label>
                 )}
                 {detectedVars.map((v) => (
@@ -294,7 +295,7 @@ export function PipelinesView() {
           {model && (
             <div className="mb-3">
               <div className="mb-1 flex items-center gap-1 font-semibold text-neutral-300">
-                <span>🔄</span><span className="truncate">{selected}</span>
+                <Workflow className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{selected}</span>
               </div>
               {model.stages.map((stage, si) => {
                 const last = si === model.stages.length - 1;
@@ -302,7 +303,7 @@ export function PipelinesView() {
                   <div key={si} className="flex">
                     <span className="select-none pr-1 font-mono text-neutral-700">{last ? "└─" : "├─"}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-neutral-500">📦 Stage {si + 1}{stage.length > 1 ? " ∥" : ""}</div>
+                      <div className="flex items-center gap-1 text-neutral-500"><Layers className="h-3 w-3" /> Stage {si + 1}{stage.length > 1 ? " ∥" : ""}</div>
                       <div className={`ml-1 flex flex-col gap-0.5 border-l pl-2 ${last ? "border-transparent" : "border-neutral-800"}`}>
                         {stage.map((step) => {
                           const a = stepAgent(step.name);
@@ -329,7 +330,7 @@ export function PipelinesView() {
           )}
           {[...otherRuns.entries()].map(([name, l]) => (
             <div key={name} className="mb-3">
-              <div className="mb-1 flex items-center gap-1 text-neutral-500"><span>🔄</span><span className="truncate">{name}</span></div>
+              <div className="mb-1 flex items-center gap-1 text-neutral-500"><Workflow className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{name}</span></div>
               {l.sort((a, b) => a.Hierarchy.localeCompare(b.Hierarchy)).map((a) => (
                 <button key={a.Name} className="flex w-full items-center gap-1.5 py-0.5 text-left hover:underline"
                   onClick={() => { select(a.Name); setView("agents"); }}>

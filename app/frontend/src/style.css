@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border-radius: 4px;
   background: #262626;
   padding: 4px 12px;

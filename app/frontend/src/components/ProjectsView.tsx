@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FolderPlus, Play, X } from "lucide-react";
 import { useStore } from "../store";
 import { errText } from "../types";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
@@ -65,7 +66,7 @@ export function ProjectsView() {
           value={newUrl} onChange={(e) => setNewUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addUrl()} />
         <button className="btn" onClick={addUrl}>Add repo</button>
-        <button className="btn" onClick={addFolder}>📁 Add local folder…</button>
+        <button className="btn" onClick={addFolder}><FolderPlus className="h-3.5 w-3.5" /> Add local folder…</button>
       </div>
 
       {projects.length === 0 && (
@@ -80,9 +81,9 @@ export function ProjectsView() {
             </span>
             <span className="min-w-0 flex-1 truncate text-sm" title={p.url}>{shortName(p.url)}</span>
             {p.count > 0 && <span className="text-xs text-neutral-600">×{p.count}</span>}
-            <button className="btn" onClick={() => launch(p, "claude")}>▶ claude</button>
-            <button className="btn" onClick={() => launch(p, "codex")}>codex</button>
-            <button className="text-neutral-500 hover:text-red-400" title="forget" onClick={() => remove(p.url)}>✕</button>
+            <button className="btn" onClick={() => launch(p, "claude")}><Play className="h-3 w-3" /> claude</button>
+            <button className="btn" onClick={() => launch(p, "codex")}><Play className="h-3 w-3" /> codex</button>
+            <button className="text-neutral-500 hover:text-red-400" title="forget" onClick={() => remove(p.url)}><X className="h-3.5 w-3.5" /></button>
           </div>
         ))}
       </div>
