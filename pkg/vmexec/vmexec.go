@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,6 +16,10 @@ import (
 
 type Executor interface {
 	Run(ctx context.Context, args ...string) ([]byte, error)
+	// RunStreaming runs args in the VM and tees combined stdout+stderr live to w
+	// instead of buffering until exit. Use it for multi-minute operations (image
+	// build, VM bootstrap) so the caller sees progress as it happens.
+	RunStreaming(ctx context.Context, w io.Writer, args ...string) error
 	RunInteractive(args ...string) error
 }
 
@@ -62,6 +67,16 @@ func (e *MachineExecutor) Run(ctx context.Context, args ...string) ([]byte, erro
 		return stdout.Bytes(), fmt.Errorf("container machine run %s: %w\nstderr: %s", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
+}
+
+func (e *MachineExecutor) RunStreaming(ctx context.Context, w io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, "container", e.buildArgs(args...)...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container machine run %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 func (e *MachineExecutor) RunInteractive(args ...string) error {
@@ -114,6 +129,25 @@ func (f *FakeExecutor) Run(_ context.Context, args ...string) ([]byte, error) {
 		}
 	}
 	return []byte(""), nil
+}
+
+func (f *FakeExecutor) RunStreaming(_ context.Context, w io.Writer, args ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Log = append(f.Log, args)
+	joined := strings.Join(args, " ")
+	for prefix, msg := range f.errors {
+		if strings.HasPrefix(joined, prefix) {
+			return fmt.Errorf("%s", msg)
+		}
+	}
+	for prefix, out := range f.responses {
+		if strings.HasPrefix(joined, prefix) {
+			_, _ = io.WriteString(w, out)
+			return nil
+		}
+	}
+	return nil
 }
 
 func (f *FakeExecutor) RunInteractive(args ...string) error {

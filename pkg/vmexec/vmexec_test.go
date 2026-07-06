@@ -1,6 +1,7 @@
 package vmexec
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -119,6 +120,45 @@ func TestFakeExecutor_Reset(t *testing.T) {
 	}
 	if string(out) != "" {
 		t.Errorf("expected empty output after reset, got %q", string(out))
+	}
+}
+
+func TestFakeExecutor_RunStreaming_WritesResponseAndLogs(t *testing.T) {
+	f := NewFake()
+	f.SetResponse("docker build", "step 1\nstep 2\n")
+
+	var buf bytes.Buffer
+	if err := f.RunStreaming(context.Background(), &buf, "docker", "build", "/ctx"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.String() != "step 1\nstep 2\n" {
+		t.Errorf("unexpected streamed output: %q", buf.String())
+	}
+	last := f.LastCommand()
+	if len(last) != 3 || last[0] != "docker" || last[1] != "build" {
+		t.Errorf("RunStreaming did not log the command: %v", last)
+	}
+}
+
+func TestFakeExecutor_RunStreaming_ReturnsErrorForConfiguredPrefix(t *testing.T) {
+	f := NewFake()
+	f.SetError("docker build", "build blew up")
+
+	var buf bytes.Buffer
+	err := f.RunStreaming(context.Background(), &buf, "docker", "build", "/ctx")
+	if err == nil || err.Error() != "build blew up" {
+		t.Fatalf("expected configured error, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no output on error, got %q", buf.String())
+	}
+}
+
+func TestMachineExecutor_RunStreaming_ErrorWhenVMNotFound(t *testing.T) {
+	e := &MachineExecutor{VMName: "safe-agentic-test-nonexistent-vm-12345"}
+	var buf bytes.Buffer
+	if err := e.RunStreaming(context.Background(), &buf, "echo", "hello"); err == nil {
+		t.Error("expected error when VM does not exist, got nil")
 	}
 }
 

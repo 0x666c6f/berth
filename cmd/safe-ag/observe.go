@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/cost"
@@ -29,13 +32,23 @@ var peekLines int
 
 var peekCmd = &cobra.Command{
 	Use:   "peek [name|--latest]",
-	Short: "View last N lines of agent output",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runPeek,
+	Short: "Snapshot the live agent terminal (tmux pane)",
+	Long: `Snapshot the last lines of the agent's live tmux pane without attaching.
+
+Source: the raw on-screen terminal (running containers only). Compare with:
+  logs     rendered session transcript (conversation turns; supports -f follow)
+  output   the agent's last message, or git diff/files/commits
+  summary  container state + labels
+  replay   the structured event-log timeline`,
+	Example: `  safe-ag peek my-task            # last 30 pane lines of one agent
+  safe-ag peek --latest --lines 50  # more lines from the newest agent`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runPeek,
 }
 
 func init() {
-	peekCmd.Flags().IntVar(&peekLines, "lines", 30, "Number of lines to show")
+	peekCmd.Flags().IntVar(&peekLines, "lines", 30, "How many trailing pane lines to print")
 	addLatestFlag(peekCmd)
 	rootCmd.AddCommand(peekCmd)
 }
@@ -47,14 +60,23 @@ var logsFollow bool
 
 var logsCmd = &cobra.Command{
 	Use:   "logs [name|--latest]",
-	Short: "Show agent session conversation log",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runLogs,
+	Short: "Show the agent's session transcript as conversation turns",
+	Long: `Render the agent's session JSONL transcript as user/assistant/system turns.
+
+Source: the newest session file the CLI wrote (parsed conversation), unlike
+'peek' (raw live pane). See also 'output' (last message only) and 'replay'
+(structured event log).`,
+	Example: `  safe-ag logs my-task              # last 50 rendered turns
+  safe-ag logs --latest --lines 100  # more history from the newest agent
+  safe-ag logs my-task -f            # follow the live transcript`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runLogs,
 }
 
 func init() {
-	logsCmd.Flags().IntVar(&logsLines, "lines", 50, "Number of entries to show")
-	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Follow log output")
+	logsCmd.Flags().IntVar(&logsLines, "lines", 50, "How many recent transcript entries to show")
+	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Stream new entries live (tail -f the transcript; running container only)")
 	addLatestFlag(logsCmd)
 	rootCmd.AddCommand(logsCmd)
 }
@@ -64,6 +86,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	exec := newExecutor()
 
 	target := targetFromArgs(cmd, args)
+	if logsFollow {
+		return runLogsFollow(ctx, exec, target)
+	}
 	lines, err := loadRenderedLogs(ctx, exec, target, logsLines)
 	if err != nil {
 		return err
@@ -72,6 +97,76 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		fmt.Println(line)
 	}
 	return nil
+}
+
+// runLogsFollow tails the container's live session log and renders new entries
+// as they arrive, streaming through the VM relay (docker exec … tail -f). Ctrl-C
+// ends it cleanly: cancelling the context tears down the relayed process and the
+// resulting error is swallowed.
+func runLogsFollow(ctx context.Context, exec vmexec.Executor, target string) error {
+	name, err := docker.ResolveTarget(ctx, exec, target)
+	if err != nil {
+		return err
+	}
+	if running, _ := docker.IsRunning(ctx, exec, name); !running {
+		return fmt.Errorf("cannot follow logs of stopped container %s (omit --follow)", name)
+	}
+
+	agentType, _ := docker.InspectLabel(ctx, exec, name, labels.AgentType)
+	configDir := agentConfigDir(agentType)
+	repoLabel, _ := docker.InspectLabel(ctx, exec, name, labels.RepoDisplay)
+	searchDirs := sessionSearchDirs(configDir, repoLabel)
+
+	quoted := make([]string, 0, len(searchDirs))
+	for _, d := range searchDirs {
+		quoted = append(quoted, shellQuote(d))
+	}
+	findExpr := "find " + strings.Join(quoted, " ") + ` -name '*.jsonl' -not -path '*/subagents/*' -not -name 'history.jsonl' -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-`
+	tailCmd := fmt.Sprintf(`f=$(%s); if [ -z "$f" ]; then echo "no session log found" >&2; exit 1; fi; exec tail -n %d -f "$f"`, findExpr, logsLines)
+
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+
+	rw := &renderingWriter{out: os.Stdout}
+	err = exec.RunStreaming(sigCtx, rw, "docker", "exec", name, "bash", "-c", tailCmd)
+	rw.flush()
+	if sigCtx.Err() != nil {
+		return nil // clean Ctrl-C exit
+	}
+	return err
+}
+
+// renderingWriter renders JSONL log lines through renderLogEntry as they stream
+// in, holding a partial trailing line until its newline arrives.
+type renderingWriter struct {
+	out  io.Writer
+	line []byte
+}
+
+func (rw *renderingWriter) Write(p []byte) (int, error) {
+	rw.line = append(rw.line, p...)
+	for {
+		i := bytes.IndexByte(rw.line, '\n')
+		if i < 0 {
+			break
+		}
+		rw.emit(rw.line[:i])
+		rw.line = append([]byte(nil), rw.line[i+1:]...)
+	}
+	return len(p), nil
+}
+
+func (rw *renderingWriter) flush() {
+	if len(rw.line) > 0 {
+		rw.emit(rw.line)
+		rw.line = nil
+	}
+}
+
+func (rw *renderingWriter) emit(line []byte) {
+	if rendered := renderLogEntry(string(bytes.TrimRight(line, "\r"))); rendered != "" {
+		fmt.Fprintln(rw.out, rendered)
+	}
 }
 
 func loadRenderedLogs(ctx context.Context, exec vmexec.Executor, target string, lineLimit int) ([]string, error) {
@@ -267,6 +362,7 @@ func ensureRunning(ctx context.Context, exec vmexec.Executor, name string) (func
 	if running {
 		return func() {}, nil
 	}
+	progressf("Starting container %s…", name)
 	if _, err := exec.Run(ctx, "docker", "start", name); err != nil {
 		return func() {}, fmt.Errorf("start container %s: %w", name, err)
 	}
@@ -284,6 +380,38 @@ func sessionSearchDirs(configDir, repo string) []string {
 	}
 	dirs = append(dirs, configDir+"/sessions", configDir)
 	return dirs
+}
+
+// observeColorEnabled reports whether ANSI color should be emitted on stdout,
+// honoring the NO_COLOR convention (https://no-color.org) and disabling color
+// when stdout is not a terminal (piped or redirected).
+var observeColorEnabled = func() bool {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// colorize wraps s in the given ANSI SGR code, or returns it unchanged when
+// color is disabled.
+func colorize(code, s string) string {
+	if !observeColorEnabled() {
+		return s
+	}
+	return "\033[" + code + "m" + s + "\033[0m"
+}
+
+// stderrIsTerminal reports whether stderr is a terminal; overridable in tests.
+var stderrIsTerminal = func() bool { return term.IsTerminal(int(os.Stderr.Fd())) }
+
+// progressf prints a one-line status to stderr, but only when stderr is a
+// terminal — so piped or redirected output stays clean. Used to break silence
+// during short waits (e.g. starting a stopped container) that print nothing.
+func progressf(format string, args ...interface{}) {
+	if !stderrIsTerminal() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 func renderLogEntry(line string) string {
@@ -322,7 +450,7 @@ func renderUserLogEntry(entry map[string]interface{}) string {
 	if content == "" {
 		return ""
 	}
-	return fmt.Sprintf("\033[0;36m> %s\033[0m", truncateObserveText(content, 200))
+	return colorize("0;36", "> "+truncateObserveText(content, 200))
 }
 
 func entryMessage(entry map[string]interface{}) map[string]interface{} {
@@ -375,7 +503,7 @@ func renderAssistantLogEntry(entry map[string]interface{}) string {
 	if content == "" {
 		return ""
 	}
-	return fmt.Sprintf("\033[0;32m  %s\033[0m", truncateObserveText(content, 300))
+	return colorize("0;32", "  "+truncateObserveText(content, 300))
 }
 
 func renderSystemLogEntry(entry map[string]interface{}) string {
@@ -396,7 +524,7 @@ func renderSystemResult(entry map[string]interface{}) string {
 	if dur <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("\033[0;33m  [%d messages, %.1fs]\033[0m", int(msgCount), dur/1000)
+	return colorize("0;33", fmt.Sprintf("  [%d messages, %.1fs]", int(msgCount), dur/1000))
 }
 
 func extractAssistantText(msg map[string]interface{}) string {
@@ -481,16 +609,27 @@ var (
 
 var outputCmd = &cobra.Command{
 	Use:   "output [name|--latest]",
-	Short: "Show agent output or changes",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runOutput,
+	Short: "Show the agent's last message (or its git changes)",
+	Long: `Print the agent's final assistant message from the session transcript, or,
+with a flag, a git view of its workspace.
+
+By default shows the last message (contrast with 'logs' = the whole transcript,
+'peek' = the live pane). The --diff/--files/--commits flags summarize the
+workspace repo; for a fuller diff use the top-level 'safe-ag diff'.`,
+	Example: `  safe-ag output my-task          # last agent message
+  safe-ag output --latest --json  # message + status as JSON
+  safe-ag output my-task --files  # files the agent changed
+  safe-ag output my-task --diff   # quick git diff (see also: safe-ag diff)`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runOutput,
 }
 
 func init() {
-	outputCmd.Flags().BoolVar(&outputDiff, "diff", false, "Show git diff")
-	outputCmd.Flags().BoolVar(&outputFiles, "files", false, "Show changed files")
-	outputCmd.Flags().BoolVar(&outputCommits, "commits", false, "Show git commit log")
-	outputCmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	outputCmd.Flags().BoolVar(&outputDiff, "diff", false, "Show a git diff of the workspace instead of the message ('safe-ag diff' is the fuller form)")
+	outputCmd.Flags().BoolVar(&outputFiles, "files", false, "List files the agent changed (git diff --name-only plus untracked)")
+	outputCmd.Flags().BoolVar(&outputCommits, "commits", false, "Show the workspace commit log (git log --oneline) instead of the message")
+	outputCmd.Flags().BoolVar(&outputJSON, "json", false, "Emit {name, status, last_output} as JSON for scripting")
 	addLatestFlag(outputCmd)
 	rootCmd.AddCommand(outputCmd)
 }
@@ -780,9 +919,14 @@ func runGitOnStoppedWorkspace(ctx context.Context, exec vmexec.Executor, name, g
 
 var summaryCmd = &cobra.Command{
 	Use:   "summary [name|--latest]",
-	Short: "Show detailed agent summary",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runSummary,
+	Short: "One-screen overview of an agent's state and config",
+	Long: `Show an agent's status, timing, repo, and isolation settings on one screen.
+
+Source: container metadata only (docker inspect state + safe-agentic labels) —
+no transcript or git data. For those use 'logs', 'output', or 'diff'.`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runSummary,
 }
 
 func init() {
@@ -854,13 +998,18 @@ var costHistory string
 
 var costCmd = &cobra.Command{
 	Use:   "cost [name|--latest]",
-	Short: "Estimate API cost from session data",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runCost,
+	Short: "Estimate an agent's API spend from token usage",
+	Long: `Estimate an agent's API spend by summing token usage from its session files
+and pricing it against the model rate table.
+
+Requires access to the agent's session JSONL (running or reusable container).`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runCost,
 }
 
 func init() {
-	costCmd.Flags().StringVar(&costHistory, "history", "", "Show historical costs (e.g. 7d, 30d)")
+	costCmd.Flags().StringVar(&costHistory, "history", "", "Instead, summarize spawn activity (counts, not $) over a past window from the audit log, e.g. 7d, 30d")
 	addLatestFlag(costCmd)
 	rootCmd.AddCommand(costCmd)
 }
@@ -1146,12 +1295,17 @@ var auditLines int
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
-	Short: "Show audit log entries",
-	RunE:  runAudit,
+	Short: "Show the host operation log (spawns, stops, cleanups)",
+	Long: `Print recent entries from the host-side audit log (~/.safe-ag/state/audit.jsonl):
+every safe-ag operation with its timestamp, action, container, and details.
+
+This is the CLI's own action log — for an agent's own activity use 'replay'.`,
+	GroupID: groupObserve,
+	RunE:    runAudit,
 }
 
 func init() {
-	auditCmd.Flags().IntVar(&auditLines, "lines", 50, "Number of entries to show")
+	auditCmd.Flags().IntVar(&auditLines, "lines", 50, "How many recent log entries to show")
 	rootCmd.AddCommand(auditCmd)
 }
 
@@ -1183,9 +1337,18 @@ func runAudit(cmd *cobra.Command, args []string) error {
 
 var sessionsCmd = &cobra.Command{
 	Use:   "sessions [name|--latest] [dest]",
-	Short: "Export session data from container",
-	Args:  cobra.RangeArgs(0, 2),
-	RunE:  runSessions,
+	Short: "Export raw session files from a container to the host",
+	Long: `Copy the agent's raw session JSONL files out of the container to a host
+directory (dest, default ./agent-sessions/<name>). Starts the container if
+stopped.
+
+Exports the unrendered files; to read them in place use 'logs' or 'output'.`,
+	Example: `  safe-ag sessions my-task              # export to ./agent-sessions/my-task
+  safe-ag sessions my-task ~/backups/    # export to a chosen directory
+  safe-ag sessions --latest ~/sessions/  # export the newest agent`,
+	Args:    cobra.RangeArgs(0, 2),
+	GroupID: groupObserve,
+	RunE:    runSessions,
 }
 
 func init() {
@@ -1314,13 +1477,20 @@ var replayToolsOnly bool
 
 var replayCmd = &cobra.Command{
 	Use:   "replay [name|--latest]",
-	Short: "Replay session from event log",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runReplay,
+	Short: "Replay the agent's event-log timeline",
+	Long: `Replay the agent's structured event log as a timeline: session start/end,
+tool calls, git commits, and agent messages.
+
+Source: /workspace/.safe-agentic/session-events.jsonl (the safe-agentic event
+log), distinct from 'logs' (the model's conversation transcript) and 'audit'
+(the host CLI operation log). Starts the container if stopped.`,
+	Args:    cobra.MaximumNArgs(1),
+	GroupID: groupObserve,
+	RunE:    runReplay,
 }
 
 func init() {
-	replayCmd.Flags().BoolVar(&replayToolsOnly, "tools-only", false, "Show only tool calls")
+	replayCmd.Flags().BoolVar(&replayToolsOnly, "tools-only", false, "Show only tool-call events, hiding messages and lifecycle events")
 	addLatestFlag(replayCmd)
 	rootCmd.AddCommand(replayCmd)
 }

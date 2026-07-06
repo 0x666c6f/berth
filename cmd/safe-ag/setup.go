@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/0x666c6f/safe-agentic/pkg/config"
+	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 	"github.com/0x666c6f/safe-agentic/pkg/worktrees"
 	"github.com/spf13/cobra"
 )
@@ -72,8 +73,14 @@ func startVMImpl(vmName string) error {
 	return start.Run()
 }
 
+// runVMBootstrapImpl runs vm/setup.sh in the VM. setup.sh installs Docker and
+// hardens the machine — a multi-minute operation — so it streams its combined
+// output live to stdout instead of buffering silently until exit.
 func runVMBootstrapImpl(vmName, worktreesDir, homeDir string) ([]byte, error) {
-	return exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/sh", "/tmp/setup.sh", worktreesDir, homeDir).CombinedOutput()
+	cmd := exec.Command("container", "machine", "run", "-n", vmName, "-u", "root", "--", "/bin/sh", "/tmp/setup.sh", worktreesDir, homeDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
+	return nil, cmd.Run()
 }
 
 // machineCreateArgs builds the `container machine create` argument vector.
@@ -626,8 +633,12 @@ func appleScriptQuote(s string) string {
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Initialize VM and build Docker image",
-	RunE:  runSetup,
+	Short: "First-time setup: create the VM, harden it, build the image",
+	Long: `Create the Apple container machine, harden it, install Docker, and build the
+agent image. Run this once before spawning agents; safe to re-run to reconcile
+the VM (it also re-applies host NAT so the VM keeps internet egress).`,
+	GroupID: groupSetup,
+	RunE:    runSetup,
 }
 
 var (
@@ -748,11 +759,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
 	}
-	setupOut, err := runVMBootstrap(vmName, worktreesDir, homeDir)
-	if err != nil {
-		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
+	if _, err := runVMBootstrap(vmName, worktreesDir, homeDir); err != nil {
+		return fmt.Errorf("run VM bootstrap: %w", err)
 	}
-	fmt.Print(string(setupOut))
 	if err := installVMSupportFiles(vmName, buildRoot); err != nil {
 		return err
 	}
@@ -795,13 +804,16 @@ var (
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Rebuild Docker image",
-	RunE:  runUpdate,
+	Short: "Rebuild the agent Docker image",
+	Long: `Rebuild the agent image. By default it uses Docker's layer cache; use --quick
+to only refresh the AI CLI layer, or --full to rebuild from scratch.`,
+	GroupID: groupSetup,
+	RunE:    runUpdate,
 }
 
 func init() {
-	updateCmd.Flags().BoolVar(&updateQuick, "quick", false, "Bust only the AI CLI layer")
-	updateCmd.Flags().BoolVar(&updateFull, "full", false, "Full rebuild (no cache)")
+	updateCmd.Flags().BoolVar(&updateQuick, "quick", false, "Rebuild only the AI CLI layer (fast; picks up new Claude/Codex versions)")
+	updateCmd.Flags().BoolVar(&updateFull, "full", false, "Rebuild every layer from scratch with no cache (slowest, most thorough)")
 	rootCmd.AddCommand(updateCmd)
 }
 
@@ -821,9 +833,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	return runDockerBuild(ctx, vmRunner)
 }
 
-func runDockerBuild(ctx context.Context, vmRunner interface {
-	Run(context.Context, ...string) ([]byte, error)
-}) error {
+func runDockerBuild(ctx context.Context, vmRunner vmexec.Executor) error {
 	buildArgs := []string{"docker", "build", "-t", "safe-agentic:latest", "/tmp/build-context"}
 
 	switch {
@@ -834,12 +844,12 @@ func runDockerBuild(ctx context.Context, vmRunner interface {
 		buildArgs = []string{"docker", "build", "--build-arg", "CLI_CACHE_BUST=" + cacheBust, "-t", "safe-agentic:latest", "/tmp/build-context"}
 	}
 
+	// Stream the build log live: it runs for minutes, and on failure the output is
+	// the only clue to what broke — buffering it discarded that on error.
 	fmt.Println("Building safe-agentic:latest…")
-	out, err := vmRunner.Run(ctx, buildArgs...)
-	if err != nil {
+	if err := vmRunner.RunStreaming(ctx, os.Stdout, buildArgs...); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
-	fmt.Print(string(out))
 	fmt.Println("✓ Image updated")
 	return nil
 }
@@ -847,19 +857,20 @@ func runDockerBuild(ctx context.Context, vmRunner interface {
 // ─── vm ────────────────────────────────────────────────────────────────────
 
 var vmCmd = &cobra.Command{
-	Use:   "vm",
-	Short: "Manage the Apple container machine",
+	Use:     "vm",
+	Short:   "Manage the Apple container machine (start/stop/ssh)",
+	GroupID: groupSetup,
 }
 
 var vmSSHCmd = &cobra.Command{
 	Use:   "ssh",
-	Short: "Open an interactive shell in the VM",
+	Short: "Open an interactive debug shell inside the VM",
 	RunE:  runVMSSH,
 }
 
 var vmStartCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the VM (and re-harden)",
+	Short: "Start the VM, re-harden it, and re-apply host NAT (restores egress)",
 	RunE:  runVMStart,
 }
 
@@ -912,11 +923,9 @@ func runVMStart(cmd *cobra.Command, args []string) error {
 	if err := copyFileToVM(vmName, filepath.Join(buildRoot, "vm", "setup.sh"), "/tmp/setup.sh"); err != nil {
 		return err
 	}
-	setupOut, err := runVMBootstrap(vmName, worktreesDir, homeDir)
-	if err != nil {
-		return fmt.Errorf("run VM bootstrap: %w\n%s", err, string(setupOut))
+	if _, err := runVMBootstrap(vmName, worktreesDir, homeDir); err != nil {
+		return fmt.Errorf("run VM bootstrap: %w", err)
 	}
-	fmt.Print(string(setupOut))
 	if err := installVMSupportFiles(vmName, buildRoot); err != nil {
 		return err
 	}
@@ -940,9 +949,10 @@ func runVMStop(cmd *cobra.Command, args []string) error {
 // ─── diagnose ──────────────────────────────────────────────────────────────
 
 var diagnoseCmd = &cobra.Command{
-	Use:   "diagnose",
-	Short: "Check environment health",
-	RunE:  runDiagnose,
+	Use:     "diagnose",
+	Short:   "Health-check the VM, egress, image, and worktree posture",
+	GroupID: groupSetup,
+	RunE:    runDiagnose,
 }
 
 func init() {
@@ -953,9 +963,10 @@ func init() {
 // ─── tui ──────────────────────────────────────────────────────────────
 
 var tuiCmd = &cobra.Command{
-	Use:   "tui",
-	Short: "Launch interactive TUI",
-	RunE:  runTUI,
+	Use:     "tui",
+	Short:   "Launch the k9s-style interactive dashboard",
+	GroupID: groupSetup,
+	RunE:    runTUI,
 }
 
 func findTUIBinary() (string, error) {
