@@ -45,7 +45,7 @@ func TestLiveAttachSpike(t *testing.T) {
 	target := spikeTarget()
 	rec := &emit.Recorder{}
 	m := NewManager(rec, DefaultFactory("safe-agentic"))
-	id, err := m.Open(target)
+	id, err := m.Open(target, 137, 41)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

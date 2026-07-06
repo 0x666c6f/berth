@@ -6,7 +6,9 @@ type TerminalService struct {
 	Manager *term.Manager
 }
 
-func (t *TerminalService) Open(container string) (string, error) { return t.Manager.Open(container) }
+func (t *TerminalService) Open(container string, cols, rows int) (string, error) {
+	return t.Manager.Open(container, cols, rows)
+}
 func (t *TerminalService) Write(id, data string) error           { return t.Manager.Write(id, data) }
 func (t *TerminalService) Resize(id string, cols, rows int) error {
 	return t.Manager.Resize(id, cols, rows)

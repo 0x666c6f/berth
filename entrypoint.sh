@@ -257,7 +257,11 @@ start_tmux_session() {
   local session_name="$1"
   shift
 
-  tmux new-session -d -s "$session_name" "$AGENT_SESSION_LIB" "$@"
+  # Give the detached session a concrete default size: with window-size
+  # manual (set in tmux.conf so the desktop app can drive the size), a
+  # session created with no client has an undefined 0x0 window and the tmux
+  # server dies. The app resizes to the real xterm size on attach.
+  tmux new-session -x 200 -y 50 -d -s "$session_name" "$AGENT_SESSION_LIB" "$@"
   tmux set-option -t "$session_name" history-limit "$TMUX_HISTORY_LIMIT" >/dev/null 2>&1 || true
 }
 

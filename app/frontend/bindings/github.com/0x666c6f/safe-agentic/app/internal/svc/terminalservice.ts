@@ -9,8 +9,8 @@ export function Close(id: string): $CancellablePromise<void> {
     return $Call.ByID(952659619, id);
 }
 
-export function Open(container: string): $CancellablePromise<string> {
-    return $Call.ByID(1079702345, container);
+export function Open(container: string, cols: number, rows: number): $CancellablePromise<string> {
+    return $Call.ByID(1079702345, container, cols, rows);
 }
 
 export function Resize(id: string, cols: number, rows: number): $CancellablePromise<void> {

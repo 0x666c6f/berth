@@ -50,14 +50,16 @@ export function TerminalPane({ container }: { container: string }) {
     let offExit = () => {};
     let disposed = false;
 
-    TerminalService.Open(container)
+    // Open the PTY AT the fitted xterm size so tmux attaches at the right
+    // dimensions immediately (SIGWINCH from a later resize is unreliable
+    // through the relay — see the Go side).
+    TerminalService.Open(container, xterm.cols, xterm.rows)
       .then((tid: string) => {
         if (disposed) { TerminalService.Close(tid); return; }
         id = tid;
         offData = Events.On(`term:data:${tid}`, (e: any) => xterm.write(b64ToBytes(unwrap(e))));
         offExit = Events.On(`term:exit:${tid}`, () =>
           xterm.writeln("\r\n\x1b[33m[disconnected — press ⟳ Reattach]\x1b[0m"));
-        TerminalService.Resize(tid, xterm.cols, xterm.rows);
         xterm.focus();
       })
       .catch((e: unknown) => setError(errText(`attach ${container}`, e)));

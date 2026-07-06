@@ -36,7 +36,7 @@ func TestOpenWriteEchoClose(t *testing.T) {
 	m := NewManager(rec, func(container string) *exec.Cmd {
 		return exec.Command("/bin/cat")
 	})
-	id, err := m.Open("agent-x")
+	id, err := m.Open("agent-x", 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
