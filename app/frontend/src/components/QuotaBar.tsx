@@ -16,6 +16,17 @@ const resetIn = (unix: number) => {
   return h > 0 ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
 };
 
+// Compact countdown for the row itself: 34m, 2h05m, 5d.
+const resetShort = (unix: number) => {
+  if (!unix) return "";
+  const secs = unix - Math.floor(Date.now() / 1000);
+  if (secs <= 0) return "now";
+  const d = Math.floor(secs / 86400);
+  if (d > 0) return `${d}d`;
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+  return h > 0 ? `${h}h${String(m).padStart(2, "0")}m` : `${m}m`;
+};
+
 export function QuotaBar() {
   const [quotas, setQuotas] = useState<Quota[]>([]);
   useEffect(() => {
@@ -50,6 +61,7 @@ export function QuotaBar() {
                       <div className="h-full rounded-full" style={{ width: `${Math.max(2, left)}%`, backgroundColor: barColor(left) }} />
                     </div>
                     <span className="w-7 text-right tabular-nums text-neutral-500">{left.toFixed(0)}%</span>
+                    <span className="w-11 text-right tabular-nums text-neutral-600">{resetShort(w.resetsAt)}</span>
                   </div>
                 );
               })}
