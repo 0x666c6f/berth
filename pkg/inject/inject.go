@@ -69,6 +69,29 @@ func ReadClaudeAuth(homeDir string) (map[string]string, error) {
 	return envs, nil
 }
 
+// ReadGHToken reads the host's GitHub CLI token and returns it as GH_TOKEN
+// (and GITHUB_TOKEN) so `gh auth setup-git` inside the container can
+// authenticate HTTPS git operations against private repos.
+func ReadGHToken() (map[string]string, error) {
+	envs := make(map[string]string)
+	if t := os.Getenv("GH_TOKEN"); t != "" {
+		envs["GH_TOKEN"] = t
+		envs["GITHUB_TOKEN"] = t
+		return envs, nil
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return envs, nil
+	}
+	token := strings.TrimSpace(string(out))
+	if token == "" {
+		return envs, nil
+	}
+	envs["GH_TOKEN"] = token
+	envs["GITHUB_TOKEN"] = token
+	return envs, nil
+}
+
 // ReadClaudeCredentialsFile reads ~/.claude/.credentials.json (the live OAuth
 // credential store) and returns it as SAFE_AGENTIC_CLAUDE_CREDS_B64. This is
 // the authoritative login for modern Claude Code; the keychain token below is

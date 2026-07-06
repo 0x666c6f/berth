@@ -305,7 +305,11 @@ git config --global user.name  "${GIT_AUTHOR_NAME:-Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@localhost}"
 git config --global core.pager "delta --dark"
 git config --global init.defaultBranch main
-if command -v gh >/dev/null 2>&1 && [ -s /home/agent/.config/gh/hosts.yml ]; then
+# Wire gh auth into git for HTTPS clones of private repos. Runs when gh has a
+# hosts.yml OR a token env (GH_TOKEN, seeded from the host by --reuse-gh-auth):
+# gh's credential helper serves the token so `git clone https://github.com/…`
+# authenticates instead of prompting for a username (exit 128).
+if command -v gh >/dev/null 2>&1 && { [ -s /home/agent/.config/gh/hosts.yml ] || [ -n "${GH_TOKEN:-}" ]; }; then
   gh auth setup-git -h github.com >/dev/null 2>&1 || true
 fi
 case "${AGENT_TYPE:-}" in

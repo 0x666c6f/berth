@@ -157,7 +157,7 @@ func (s *AgentService) Clone(name string) (string, error) {
 	} else {
 		args = append(args, "--no-ssh")
 	}
-	args = append(args, "--seed-auth", "--background")
+	args = append(args, "--seed-auth", "--reuse-gh-auth", "--background")
 	return s.run(args...)
 }
 
@@ -190,7 +190,7 @@ func (s *AgentService) PipelineRun(name string, vars map[string]string, dryRun b
 type SpawnRequest struct {
 	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
 	MaxCost                                                    string // USD; engine kills the agent past this budget
-	SSH, ReuseAuth, Worktree, DryRun, NoSeedAuth               bool
+	SSH, ReuseAuth, Worktree, DryRun, NoSeedAuth, NoGHAuth     bool
 }
 
 // nameSanitize maps user-typed names onto the engine's allowed charset
@@ -224,6 +224,13 @@ func spawnArgs(req SpawnRequest) []string {
 		args = append(args, "--no-seed-auth")
 	} else {
 		args = append(args, "--seed-auth")
+	}
+	// Reuse the host's GitHub CLI auth by default so private HTTPS repos
+	// clone (gh token → git credential helper). --no-gh-auth opts out.
+	if req.NoGHAuth {
+		args = append(args, "--no-reuse-gh-auth")
+	} else {
+		args = append(args, "--reuse-gh-auth")
 	}
 	if req.Worktree {
 		args = append(args, "--worktree")
