@@ -35,8 +35,15 @@ func DefaultFactory(vmName string) CommandFactory {
 		// Route through the safe-ag-exec relay (base64-wrapped args) — the
 		// only proven convention for arg-safe execution via `container
 		// machine run`; raw args get mangled by flag parsing.
+		//
+		// attach -d: kick every other client. Killing the host relay does NOT
+		// kill the VM-side `docker exec tmux attach`, so app restarts and
+		// reattaches leak zombie clients that pin stale sizes and keep the
+		// session thrash-redrawing. The app multiplexes panes onto one client
+		// per container, so any other client is either a zombie or a stale
+		// attach that -d sweeps (and detaching ends its docker exec).
 		argv := vmexec.BuildInteractiveArgs(vmName,
-			"docker", "exec", "-it", container, "tmux", "attach", "-t", tmux.SessionName())
+			"docker", "exec", "-it", container, "tmux", "attach", "-d", "-t", tmux.SessionName())
 		cmd := exec.Command("container", argv...)
 		env := make([]string, 0, len(os.Environ())+1)
 		for _, kv := range os.Environ() {
