@@ -23,7 +23,7 @@ safe-ag vm ssh
 
 ```bash
 safe-ag spawn <claude|codex|shell> ...
-safe-ag spawn claude --worktree --name task-name
+safe-ag spawn claude --worktree --name task-name   # requires one-time: safe-ag setup --enable-worktrees
 safe-ag run <repo...> [prompt]
 safe-ag attach <name>
 safe-ag attach --latest
@@ -87,7 +87,7 @@ safe-ag todo uncheck <name> <index>
 
 safe-ag retry <name> [--feedback "..."]
 safe-ag steer <name> "address the failing test only"
-safe-ag handoff <name> --to-worktree
+safe-ag handoff <name> --to-worktree   # worktree commands need: safe-ag setup --enable-worktrees
 safe-ag handoff <name> --to-local ./workspace-copy
 safe-ag worktree snapshot <name> "before cleanup"
 safe-ag worktree restore <name> stash@{0}

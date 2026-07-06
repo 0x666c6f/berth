@@ -5,3 +5,5 @@ site/
 /safe-ag
 bin/safe-ag
 bin/safe-ag-tui
+.DS_Store
+.claude/worktrees/

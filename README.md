@@ -26,7 +26,7 @@ The goal is simple:
 - dedicated managed Docker networks by default
 - tmux-backed sessions that you can reattach to later
 - CLI + TUI for spawning, steering, monitoring, reviewing, and shipping work
-- managed worktrees for isolated host checkouts with handoff/snapshot helpers
+- managed worktrees for isolated host checkouts with handoff/snapshot helpers (opt-in: `safe-ag setup --enable-worktrees`, which deliberately widens the VM boundary — see the threat model)
 - saved profiles, project/user actions, timeline, inbox, browser capture, workspace file ops, JSON stdio server, and log search for daily loops
 - fleet and pipeline manifests for parallel and staged agent runs
 
