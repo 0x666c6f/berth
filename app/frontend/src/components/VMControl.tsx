@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useStore } from "../store";
+import { errText } from "../types";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 
 type VMAction = { key: string; label: string; confirm: boolean; danger?: boolean; exec: () => Promise<string> };
@@ -22,6 +23,8 @@ export function VMControl() {
   const [open, setOpen] = useState(false);
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [diag, setDiag] = useState<string | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
 
   const fire = async (a: VMAction) => {
     setArmed(null);
@@ -31,9 +34,39 @@ export function VMControl() {
     finally { setBusy(null); }
   };
 
+  // Diagnose runs the environment checklist (safe-ag diagnose) and shows the
+  // raw output in a dismissable panel — no toast, since it's multi-line.
+  const diagnose = async () => {
+    const fn = (AgentService as any).Diagnose;
+    if (typeof fn !== "function") { setDiag("Diagnose is unavailable in this build."); return; }
+    setDiagBusy(true);
+    try { setDiag((await fn()) || "(no output)"); }
+    catch (e) { setDiag(errText("diagnose", e)); }
+    finally { setDiagBusy(false); }
+  };
+
   return (
+    <>
+    {diag != null && (
+      <div className="max-h-64 overflow-y-auto border-t border-red-900 bg-neutral-950 px-4 py-2 font-mono text-xs text-neutral-300">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="font-semibold uppercase tracking-wider text-neutral-500">Diagnostics</span>
+          <button aria-label="Dismiss diagnostics" className="text-neutral-500 hover:text-neutral-200" onClick={() => setDiag(null)}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <pre className="whitespace-pre-wrap">{diag}</pre>
+      </div>
+    )}
     <div className={`flex items-center justify-end gap-1.5 border-t px-3 py-1 text-xs ${vmOk ? "border-neutral-800 bg-neutral-900" : "border-red-900 bg-red-950/80"}`}>
       {!vmOk && <span className="min-w-0 flex-1 truncate text-red-300">VM unreachable: {vmError}</span>}
+      {!vmOk && (
+        <button disabled={diagBusy} title="Run safe-ag diagnose (environment checklist)"
+          className="rounded bg-neutral-800 px-2 py-0.5 text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
+          onClick={diagnose}>
+          {diagBusy ? "diagnosing…" : "Diagnose"}
+        </button>
+      )}
       {open && ACTIONS.map((a) => (
         <button key={a.key} disabled={!!busy}
           title={a.key === "repair" ? "Re-run safe-ag setup (re-harden, reconcile Docker/NAT)" : `safe-ag vm ${a.key}`}
@@ -52,5 +85,6 @@ export function VMControl() {
         </span>
       </button>
     </div>
+    </>
   );
 }

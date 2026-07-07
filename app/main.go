@@ -156,6 +156,7 @@ func main() {
 	poller := poll.NewPoller(exec, em, 2*time.Second)
 	runner := cli.NewRunner()
 	runner.OnCommand = func(argv []string) { log.Printf("exec: %v", argv) }
+	runner.OnExec = func(e cli.CommandEntry) { em.Emit("cli.exec", e) }
 	termMgr := term.NewManager(em, term.DefaultFactory(vmName()))
 	stateSvc := state.NewService()
 	watcher := watch.NewWatcher(config.EventsPath(), em, 5*time.Second)

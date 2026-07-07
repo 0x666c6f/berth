@@ -11,6 +11,9 @@ import * as cli$0 from "../cli/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as poll$0 from "../poll/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as audit$0 from "../../../pkg/audit/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -18,6 +21,15 @@ import * as $models from "./models.js";
 
 export function Agents(): $CancellablePromise<poll$0.Agent[] | null> {
     return $Call.ByID(693732554);
+}
+
+/**
+ * AuditFor returns this container's audit entries, filtered server-side BEFORE
+ * truncating to limit (so a busy neighbour can't push a quiet agent's rows out
+ * of a global tail). limit<=0 returns all matching entries.
+ */
+export function AuditFor(name: string, limit: number): $CancellablePromise<audit$0.Entry[] | null> {
+    return $Call.ByID(2287484934, name, limit);
 }
 
 export function CheckpointCreate(name: string, label: string): $CancellablePromise<void> {
@@ -50,6 +62,13 @@ export function CloneLocalFolder(container: string, localPath: string): $Cancell
 }
 
 /**
+ * CommandLog returns the recent executed safe-ag commands (the console feed).
+ */
+export function CommandLog(): $CancellablePromise<cli$0.CommandEntry[] | null> {
+    return $Call.ByID(1896204041);
+}
+
+/**
  * ConfigSync pushes current host Claude settings into the container;
  * restart applies them immediately (the session resumes).
  */
@@ -63,6 +82,22 @@ export function Cost(name: string): $CancellablePromise<string> {
 
 export function CostHistory(window: string): $CancellablePromise<string> {
     return $Call.ByID(2624464075, window);
+}
+
+/**
+ * CostSummary returns `safe-ag cost <name>` stdout, pairing with the MaxCost
+ * budget surfaced on the agent card.
+ */
+export function CostSummary(name: string): $CancellablePromise<string> {
+    return $Call.ByID(451166327, name);
+}
+
+/**
+ * Diagnose returns `safe-ag diagnose` stdout. Uses the long timeout — diagnose
+ * probes the VM/Docker/NAT and can take well over the default budget.
+ */
+export function Diagnose(): $CancellablePromise<string> {
+    return $Call.ByID(745796388);
 }
 
 export function Diff(name: string): $CancellablePromise<string> {
@@ -80,7 +115,7 @@ export function Output(name: string): $CancellablePromise<cli$0.OutputInfo> {
     return $Call.ByID(1181229993, name);
 }
 
-export function PR(name: string): $CancellablePromise<void> {
+export function PR(name: string): $CancellablePromise<string> {
     return $Call.ByID(1098575466, name);
 }
 
@@ -115,7 +150,7 @@ export function Retry(name: string, feedback: string): $CancellablePromise<void>
     return $Call.ByID(4119827342, name, feedback);
 }
 
-export function Review(name: string): $CancellablePromise<void> {
+export function Review(name: string): $CancellablePromise<string> {
     return $Call.ByID(4193130360, name);
 }
 

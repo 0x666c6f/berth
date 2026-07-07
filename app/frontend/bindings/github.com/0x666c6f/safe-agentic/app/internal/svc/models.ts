@@ -55,7 +55,7 @@ export interface SpawnRequest {
     "CPUs": string;
 
     /**
-     * USD; engine kills the agent past this budget
+     * USD budget label (advisory)
      */
     "MaxCost": string;
 
@@ -63,6 +63,16 @@ export interface SpawnRequest {
      * local checkout for --worktree (the CLI worktrees its cwd)
      */
     "WorktreeDir": string;
+
+    /**
+     * standing instructions added to the agent's context
+     */
+    "Instructions": string;
+
+    /**
+     * ~/.aws profile injected as env creds
+     */
+    "AWSProfile": string;
     "SSH": boolean;
     "ReuseAuth": boolean;
     "Worktree": boolean;

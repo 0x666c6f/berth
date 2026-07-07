@@ -86,11 +86,18 @@ export function PipelinesView() {
   const [busy, setBusy] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState("");
+  const [armDel, setArmDel] = useState(false);
+  // When there are unsaved edits, navigating away arms first: navArm holds the
+  // pipeline name (or NEW_NAV for "+ New") pending a discard-confirm click.
+  const [navArm, setNavArm] = useState<string | null>(null);
 
   const reload = () => Service.PipelineList().then((p: string[] | null) => setList(p ?? [])).catch(() => {});
   useEffect(() => { reload(); Service.Projects().then((p: any[] | null) => setProjects((p ?? []).map((x) => x.url))).catch(() => {}); }, []);
 
+  const clearArms = () => { setArmDel(false); setNavArm(null); };
+
   const open = async (name: string) => {
+    clearArms();
     try {
       const text = await Service.PipelineRead(name);
       const parsed = parsePipeline(text);
@@ -102,15 +109,30 @@ export function PipelinesView() {
 
   const create = (name: string) => {
     const n = name.trim(); if (!n) return;
+    clearArms();
     setSelected(n); setModel(emptyPipeline(n)); setRaw(null); setRawMode(false);
     setDirty(true); setResult(""); setVars({}); setPrUrl(""); setNaming(null);
+  };
+
+  // Navigation guards: with unsaved edits, the first click arms (relabels the
+  // target "discard edits?"), the second goes through. Clean state navigates
+  // immediately.
+  const NEW_NAV = "\0new";
+  const guardedOpen = (name: string) => {
+    if (name === selected) return;
+    if (dirty && navArm !== name) { setNavArm(name); return; }
+    open(name);
+  };
+  const guardedNew = () => {
+    if (dirty && navArm !== NEW_NAV) { setNavArm(NEW_NAV); return; }
+    clearArms(); setNaming("");
   };
 
   const currentYaml = () => rawMode && raw !== null ? raw : model ? dumpPipeline(model) : "";
 
   const save = async () => {
     if (!selected) return;
-    try { await Service.PipelineSave(selected, currentYaml()); setDirty(false); reload(); toast(`saved ${selected}`); }
+    try { await Service.PipelineSave(selected, currentYaml()); setDirty(false); setNavArm(null); reload(); toast(`saved ${selected}`); }
     catch (e) { toast(errText("save", e)); }
   };
   const del = async () => {
@@ -181,7 +203,9 @@ export function PipelinesView() {
       <div className="flex w-52 shrink-0 flex-col border-r border-neutral-800">
         <div className="flex items-center justify-between px-3 py-2">
           <span className="text-sm font-semibold">Pipelines</span>
-          <button className="btn" onClick={() => setNaming("")}>+ New</button>
+          <button className={navArm === NEW_NAV ? "rounded bg-red-800 px-2 py-0.5 text-xs text-red-100" : "btn"}
+            title={navArm === NEW_NAV ? "discard unsaved edits and start a new pipeline?" : "new pipeline"}
+            onClick={guardedNew}>{navArm === NEW_NAV ? "discard?" : "+ New"}</button>
         </div>
         {naming !== null && (
           <input autoFocus className="input mx-2 mb-1 text-xs" placeholder="name (e.g. reviews/x) ↵"
@@ -191,8 +215,10 @@ export function PipelinesView() {
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {list.map((p) => (
-            <button key={p} onClick={() => open(p)}
-              className={`block w-full truncate px-3 py-1.5 text-left text-sm ${selected === p ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-800/60"}`}>{p}</button>
+            <button key={p} onClick={() => guardedOpen(p)}
+              title={navArm === p ? "discard unsaved edits?" : p}
+              className={`block w-full truncate px-3 py-1.5 text-left text-sm ${navArm === p ? "bg-red-900/60 text-red-100" : selected === p ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-800/60"}`}>
+              {navArm === p ? "discard edits?" : p}</button>
           ))}
           {list.length === 0 && <div className="px-3 py-4 text-xs text-neutral-600">No pipelines yet.</div>}
         </div>
@@ -203,7 +229,7 @@ export function PipelinesView() {
         {!selected ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-neutral-500">
             <div>Build a pipeline visually — parallel steps side by side, stages top to bottom.</div>
-            <button className="btn bg-green-800 hover:bg-green-700" onClick={() => setNaming("")}>+ New pipeline</button>
+            <button className="btn bg-green-800 hover:bg-green-700" onClick={guardedNew}>+ New pipeline</button>
           </div>
         ) : (
           <>
@@ -217,7 +243,12 @@ export function PipelinesView() {
               <button className="btn ml-auto" disabled={!dirty} onClick={save}>Save</button>
               <button className="btn" disabled={busy} onClick={() => run(true)}>Dry-run</button>
               <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50" disabled={busy || dirty} title={dirty ? "save first" : ""} onClick={() => run(false)}><Play className="h-3 w-3" /> Run</button>
-              <button className="px-1 text-neutral-500 hover:text-red-400" onClick={del} title="delete"><X className="h-3.5 w-3.5" /></button>
+              <button
+                className={armDel ? "rounded bg-red-700 px-2 py-0.5 text-xs text-red-50" : "px-1 text-neutral-500 hover:text-red-400"}
+                onClick={() => (armDel ? (setArmDel(false), del()) : setArmDel(true))}
+                title={armDel ? "click again to delete this pipeline" : "delete pipeline"}>
+                {armDel ? "delete?" : <X className="h-3.5 w-3.5" />}
+              </button>
             </div>
 
             {detectedVars.length > 0 && (

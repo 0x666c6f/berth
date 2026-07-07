@@ -49,6 +49,31 @@ func probeActivities(ctx context.Context, exec vmexec.Executor, agents []Agent) 
 	wg.Wait()
 }
 
+// carryState reuses the previous snapshot's Activity/State for still-running
+// agents on ticks where we skip the (expensive) per-agent probe, so the
+// throttled probe cadence doesn't flip live agents to empty/idle between
+// probes. Stopped agents are classified locally (no exec).
+func carryState(agents []Agent, prev []Agent) {
+	byName := make(map[string]Agent, len(prev))
+	for _, a := range prev {
+		byName[a.Name] = a
+	}
+	for i := range agents {
+		if !agents[i].Running {
+			agents[i].Activity = "Stopped"
+			setStoppedState(&agents[i])
+			continue
+		}
+		if p, ok := byName[agents[i].Name]; ok {
+			agents[i].Activity = p.Activity
+			agents[i].State = p.State
+			agents[i].StateReason = p.StateReason
+		}
+		// New running agent with no prior probe: keep ParsePS defaults
+		// (Activity=Idle); the next probe tick fills in State.
+	}
+}
+
 // setStoppedState mirrors tui/poller.go: clean "Exited (0)" is done, anything
 // else a non-zero exit.
 func setStoppedState(a *Agent) {

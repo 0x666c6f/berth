@@ -31,4 +31,10 @@ export interface Agent {
     "Memory": string;
     "NetIO": string;
     "PIDs": string;
+
+    /**
+     * from docker labels (immutable per container, cached)
+     */
+    "Prompt": string;
+    "MaxCost": string;
 }

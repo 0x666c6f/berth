@@ -29,6 +29,7 @@ const resetShort = (unix: number) => {
 
 export function QuotaBar() {
   const [quotas, setQuotas] = useState<Quota[]>([]);
+  const [, setTick] = useState(0);
   useEffect(() => {
     let live = true;
     const load = () => QuotaService.Quotas().then((q: any) => { if (live) setQuotas(q ?? []); }).catch(() => {});
@@ -37,6 +38,12 @@ export function QuotaBar() {
     // 5 min (the Go side also caches, so this never hammers the network).
     const t = setInterval(load, 5 * 60 * 1000);
     return () => { live = false; clearInterval(t); };
+  }, []);
+  // Re-render every 45s so the countdown labels (resetIn/resetShort, computed
+  // from Date.now() at render) stay current between the slow quota polls.
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 45 * 1000);
+    return () => clearInterval(t);
   }, []);
   if (!quotas.length) return null;
 

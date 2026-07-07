@@ -2,10 +2,13 @@ package svc
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
+	"github.com/0x666c6f/safe-agentic/app/internal/state"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
@@ -134,5 +137,28 @@ func TestSpawnArgsMaxCost(t *testing.T) {
 	got := strings.Join(spawnArgs(SpawnRequest{Agent: "claude", MaxCost: "2.50"}), " ")
 	if got != "spawn claude --seed-auth --reuse-gh-auth --auto-trust --max-cost 2.50 --background" {
 		t.Fatalf("argv: %q", got)
+	}
+}
+
+func TestAuditForFiltersByContainerThenTruncates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	lines := []string{
+		`{"timestamp":"t1","action":"spawn","container":"agent-x"}`,
+		`{"timestamp":"t2","action":"stop","container":"agent-y"}`,
+		`{"timestamp":"t3","action":"steer","container":"agent-x"}`,
+		`{"timestamp":"t4","action":"pr","container":"agent-x"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &AgentService{State: &state.Service{AuditPath: path}}
+
+	// Filter picks the 3 agent-x rows out of the global tail, not the last 2.
+	got, err := s.AuditFor("agent-x", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Action != "steer" || got[1].Action != "pr" {
+		t.Fatalf("filtered+capped wrong: %+v", got)
 	}
 }

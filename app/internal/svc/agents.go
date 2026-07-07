@@ -12,6 +12,7 @@ import (
 	"github.com/0x666c6f/safe-agentic/app/internal/cli"
 	"github.com/0x666c6f/safe-agentic/app/internal/poll"
 	"github.com/0x666c6f/safe-agentic/app/internal/state"
+	"github.com/0x666c6f/safe-agentic/pkg/audit"
 	"github.com/0x666c6f/safe-agentic/pkg/vmexec"
 )
 
@@ -51,9 +52,9 @@ func (s *AgentService) Refresh() {
 	}
 }
 
-func (s *AgentService) Stop(name string) error   { _, err := s.run("stop", name); return err }
-func (s *AgentService) PR(name string) error     { _, err := s.run("pr", name); return err }
-func (s *AgentService) Review(name string) error { _, err := s.run("review", name); return err }
+func (s *AgentService) Stop(name string) error             { _, err := s.run("stop", name); return err }
+func (s *AgentService) PR(name string) (string, error)     { return s.run("pr", name) }
+func (s *AgentService) Review(name string) (string, error) { return s.run("review", name) }
 
 func (s *AgentService) Steer(name, message string) error {
 	_, err := s.run("steer", name, message)
@@ -159,9 +160,48 @@ func (s *AgentService) CheckpointRestore(name, ref string) error {
 
 func (s *AgentService) Cost(name string) (string, error) { return s.run("cost", name) }
 
+// CostSummary returns `safe-ag cost <name>` stdout, pairing with the MaxCost
+// budget surfaced on the agent card.
+func (s *AgentService) CostSummary(name string) (string, error) { return s.run("cost", name) }
+
 func (s *AgentService) CostHistory(window string) (string, error) {
 	return s.run("cost", "--history", window)
 }
+
+// CommandLog returns the recent executed safe-ag commands (the console feed).
+func (s *AgentService) CommandLog() []cli.CommandEntry {
+	if s.Runner == nil {
+		return nil
+	}
+	return s.Runner.CommandLog()
+}
+
+// AuditFor returns this container's audit entries, filtered server-side BEFORE
+// truncating to limit (so a busy neighbour can't push a quiet agent's rows out
+// of a global tail). limit<=0 returns all matching entries.
+func (s *AgentService) AuditFor(name string, limit int) ([]audit.Entry, error) {
+	if s.State == nil {
+		return nil, nil
+	}
+	all, err := s.State.AuditTail(0) // 0 = whole log, then filter, then cap
+	if err != nil {
+		return nil, err
+	}
+	var out []audit.Entry
+	for _, e := range all {
+		if e.Container == name {
+			out = append(out, e)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+// Diagnose returns `safe-ag diagnose` stdout. Uses the long timeout — diagnose
+// probes the VM/Docker/NAT and can take well over the default budget.
+func (s *AgentService) Diagnose() (string, error) { return s.runLong("diagnose") }
 
 func (s *AgentService) TemplateList() (string, error) { return s.run("template", "list") }
 
@@ -212,6 +252,7 @@ func (s *AgentService) ConfigSync(name string, restart bool) (string, error) {
 	}
 	return s.run(args...)
 }
+
 // runLong is run() with a generous timeout for VM lifecycle operations —
 // `vm start` re-provisions (apt, Docker config, NAT) and `setup` can rebuild
 // the agent image, both well past the default 120s.
@@ -272,8 +313,10 @@ func (s *AgentService) PipelineRun(name string, vars map[string]string, dryRun b
 
 type SpawnRequest struct {
 	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
-	MaxCost                                                    string // USD; engine kills the agent past this budget
+	MaxCost                                                    string // USD budget label (advisory)
 	WorktreeDir                                                string // local checkout for --worktree (the CLI worktrees its cwd)
+	Instructions                                               string // standing instructions added to the agent's context
+	AWSProfile                                                 string // ~/.aws profile injected as env creds
 	SSH, ReuseAuth, Worktree, DryRun, NoSeedAuth, NoGHAuth     bool
 }
 
@@ -334,6 +377,12 @@ func spawnArgs(req SpawnRequest) []string {
 	}
 	if req.MaxCost != "" {
 		args = append(args, "--max-cost", req.MaxCost)
+	}
+	if req.Instructions != "" {
+		args = append(args, "--instructions", req.Instructions)
+	}
+	if req.AWSProfile != "" {
+		args = append(args, "--aws", req.AWSProfile)
 	}
 	args = append(args, "--background")
 	if req.DryRun {

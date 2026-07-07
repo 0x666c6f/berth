@@ -94,6 +94,11 @@ export function Workspace({ name }: { name: string }) {
           </select>
         )}
       </div>
+      {me?.Prompt && (
+        <div className="truncate border-b border-neutral-800 px-4 py-1 text-xs text-neutral-500" title={me.Prompt}>
+          <span className="text-neutral-600">task:</span> {me.Prompt}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           {tab === "terminal" && (me?.Running

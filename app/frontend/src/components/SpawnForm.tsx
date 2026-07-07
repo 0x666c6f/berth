@@ -13,7 +13,8 @@ export function SpawnForm() {
   const [busy, setBusy] = useState<"" | "spawn" | "dry">("");
   const [req, setReq] = useState({
     Agent: "claude", Name: "", Repo: "", Prompt: "", Template: "", Network: "",
-    Memory: "", CPUs: "", MaxCost: "", WorktreeDir: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
+    Memory: "", CPUs: "", MaxCost: "", WorktreeDir: "", Instructions: "", AWSProfile: "",
+    SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
   });
   const [templates, setTemplates] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
@@ -51,11 +52,16 @@ export function SpawnForm() {
     } catch { removePendingSpawn(pid); }
   };
 
-  const Check = ({ k, label }: { k: "SSH" | "ReuseAuth" | "Worktree"; label: string }) => (
-    <label className="flex items-center gap-2 text-sm">
+  const Check = ({ k, label, title }: { k: "SSH" | "ReuseAuth" | "Worktree"; label: string; title?: string }) => (
+    <label className="flex items-center gap-2 text-sm" title={title}>
       <input type="checkbox" checked={req[k]} onChange={(e) => set(k, e.target.checked)} /> {label}
     </label>
   );
+
+  // Non-blocking format hints — spawn stays enabled even when these look off.
+  const memOk = !req.Memory.trim() || /^\d+(\.\d+)?\s*(b|kb|mb|gb|k|m|g)?$/i.test(req.Memory.trim());
+  const cpuOk = !req.CPUs.trim() || /^\d+(\.\d+)?$/.test(req.CPUs.trim());
+  const canSpawn = !busy && !(req.Worktree && !req.WorktreeDir);
 
   return (
     <div className="flex max-w-2xl flex-col gap-3 p-6">
@@ -104,33 +110,45 @@ export function SpawnForm() {
           ))}
         </div>
       )}
-      <textarea className="input min-h-24" placeholder="prompt (optional)" value={req.Prompt}
-        onChange={(e) => set("Prompt", e.target.value)} />
+      <textarea className="input min-h-24" placeholder="prompt (optional — ⌘Enter to spawn)" value={req.Prompt}
+        onChange={(e) => set("Prompt", e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && e.metaKey && canSpawn) { e.preventDefault(); submit(false); } }} />
+      <textarea className="input min-h-12" value={req.Instructions}
+        placeholder="standing instructions (optional — always-on context, e.g. focus areas or constraints)"
+        onChange={(e) => set("Instructions", e.target.value)} />
       <select className="input" value={req.Template} onChange={(e) => set("Template", e.target.value)}>
         <option value="">no template</option>
         {templates.map((t) => <option key={t} value={t}>{t}</option>)}
       </select>
       <div className="flex gap-4">
-        <Check k="SSH" label="--ssh" />
-        <Check k="ReuseAuth" label="--reuse-auth" />
-        <label className="flex items-center gap-2 text-sm" title="Work on a git worktree of a local checkout instead of cloning a repo URL (needs: safe-ag setup --enable-worktrees)">
+        <Check k="SSH" label="SSH agent forwarding" title="SSH agent forwarding — lets the agent clone/push private repos via git@" />
+        <Check k="ReuseAuth" label="Reuse shared auth" title="Reuse shared auth volume — persistent login shared across agents" />
+        <label className="flex items-center gap-2 text-sm" title="Local worktree — work on a git worktree of a local checkout instead of cloning a repo URL (needs: safe-ag setup --enable-worktrees)">
           <input type="checkbox" checked={req.Worktree}
-            onChange={(e) => setReq((r) => ({ ...r, Worktree: e.target.checked, ...(e.target.checked ? { Repo: "" } : { WorktreeDir: "" }) }))} /> --worktree
+            onChange={(e) => setReq((r) => ({ ...r, Worktree: e.target.checked, ...(e.target.checked ? { Repo: "" } : { WorktreeDir: "" }) }))} /> Local worktree
         </label>
       </div>
       <div className="flex gap-2">
         <input className="input flex-1" placeholder="network (blank = dedicated)" value={req.Network} onChange={(e) => set("Network", e.target.value)} />
         <input className="input w-24" placeholder="memory" value={req.Memory} onChange={(e) => set("Memory", e.target.value)} />
         <input className="input w-20" placeholder="cpus" value={req.CPUs} onChange={(e) => set("CPUs", e.target.value)} />
-        <input className="input w-28" placeholder="max cost $" title="Kill the agent when its estimated API spend exceeds this budget"
+        <input className="input w-28" placeholder="max cost $" title="Cost budget in USD, recorded on the agent (advisory)"
           value={req.MaxCost} onChange={(e) => set("MaxCost", e.target.value)} />
+        <input className="input w-32" placeholder="aws profile" title="Inject a ~/.aws profile as env credentials (tmpfs-backed; refresh with aws-refresh)"
+          value={req.AWSProfile} onChange={(e) => set("AWSProfile", e.target.value)} />
       </div>
+      {(!memOk || !cpuOk) && (
+        <div className="text-xs text-yellow-500">
+          {!memOk && <div>memory looks off — try like 8g or 512m</div>}
+          {!cpuOk && <div>cpus should be a plain number like 4</div>}
+        </div>
+      )}
       <div className="flex gap-2">
         <button className="btn disabled:opacity-50" disabled={!!busy} onClick={() => submit(true)}>
           {busy === "dry" ? "Validating…" : "Dry-run preview"}
         </button>
         <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50"
-          disabled={!!busy || (req.Worktree && !req.WorktreeDir)}
+          disabled={!canSpawn}
           title={req.Worktree && !req.WorktreeDir ? "pick the local repo folder first" : ""}
           onClick={() => submit(false)}>
           {busy === "spawn" ? "Spawning…" : "Spawn"}

@@ -57,6 +57,46 @@ func TestPollerIgnoresVolatileStatsChanges(t *testing.T) {
 	}
 }
 
+func TestPollerEmitsStats(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tUp 1 minute\n")
+	fake.SetResponse("docker stats", `{"Name":"agent-x","CPUPerc":"5.00%","MemUsage":"1MiB / 8GiB","NetIO":"1kB / 0B","PIDs":"5"}`)
+	rec := &emit.Recorder{}
+	p := NewPoller(fake, rec, 20*time.Millisecond)
+	p.Start()
+	defer p.Stop()
+
+	waitFor(t, func() bool { return len(rec.Named("agents.stats")) >= 1 })
+	ev := rec.Named("agents.stats")[0]
+	m, ok := ev.Data.(map[string]AgentStats)
+	if !ok {
+		t.Fatalf("agents.stats payload type %T", ev.Data)
+	}
+	if s := m["agent-x"]; s.CPU != "5.00%" || s.Memory != "1MiB / 8GiB" || s.PIDs != "5" {
+		t.Fatalf("stats payload: %+v", m)
+	}
+}
+
+func TestPollerEnrichesLabelsCached(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tUp 1 minute\n")
+	fake.SetResponse("docker inspect", `{"safe-agentic.prompt":"fix the bug","safe-agentic.max-cost":"2.50"}`)
+	rec := &emit.Recorder{}
+	p := NewPoller(fake, rec, 20*time.Millisecond)
+	p.Start()
+	defer p.Stop()
+
+	waitFor(t, func() bool {
+		s := p.Snapshot()
+		return len(s) == 1 && s[0].Prompt == "fix the bug" && s[0].MaxCost == "2.50"
+	})
+	// Labels are immutable → inspected once and cached across ticks.
+	time.Sleep(100 * time.Millisecond)
+	if n := len(fake.CommandsMatching("docker inspect")); n != 1 {
+		t.Fatalf("want 1 inspect (cached), got %d", n)
+	}
+}
+
 func TestPollerStopBlocksFurtherEmits(t *testing.T) {
 	fake := vmexec.NewFake()
 	fake.SetResponse("docker ps -a", "agent-x\tclaude\trepo\ton\t\t\t\t\t\t\ttmux\tUp 1 minute\n")

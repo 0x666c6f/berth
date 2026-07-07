@@ -23,7 +23,7 @@ export function Toasts() {
               : <CircleX className="h-3.5 w-3.5 text-red-400" />}
           </span>
           <span className="min-w-0 flex-1">{t.text}</span>
-          <button className="shrink-0 text-neutral-400 hover:text-neutral-200" onClick={() => dismissToast(t.id)}><X className="h-3.5 w-3.5" /></button>
+          <button aria-label="Dismiss notification" className="shrink-0 text-neutral-400 hover:text-neutral-200" onClick={() => dismissToast(t.id)}><X className="h-3.5 w-3.5" /></button>
         </div>
       ))}
     </div>

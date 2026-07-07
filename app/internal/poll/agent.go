@@ -9,6 +9,7 @@ type Agent struct {
 	Activity                                                 string // "Working" | "Idle" | "Stopped"
 	State, StateReason                                       string // agentstate: blocked/working/done/idle/exited/unknown (set by poller probe)
 	CPU, Memory, NetIO, PIDs                                 string
+	Prompt, MaxCost                                          string // from docker labels (immutable per container, cached)
 }
 
 func PSFormat() string {

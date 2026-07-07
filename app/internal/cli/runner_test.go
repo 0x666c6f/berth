@@ -35,6 +35,50 @@ func TestRunFailureCarriesStderr(t *testing.T) {
 	}
 }
 
+func TestRedactArgv(t *testing.T) {
+	got := redactArgv([]string{"safe-ag", "mcp-login", "--token", "abc123", "--secret-key=xyz", "--repo", "org/repo"})
+	want := "safe-ag mcp-login --token *** --secret-key=*** --repo org/repo"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("redact: %q", strings.Join(got, " "))
+	}
+}
+
+func TestCommandLogRingAndOnExec(t *testing.T) {
+	var fired []CommandEntry
+	r := &Runner{Bin: "safe-ag", Exec: fakeExec("line1\nlast line\n", "", nil),
+		OnExec: func(e CommandEntry) { fired = append(fired, e) }}
+	if _, err := r.Run(context.Background(), "cost", "agent-x"); err != nil {
+		t.Fatal(err)
+	}
+	log := r.CommandLog()
+	if len(log) != 1 || len(fired) != 1 {
+		t.Fatalf("log=%d fired=%d", len(log), len(fired))
+	}
+	e := log[0]
+	if !e.OK || e.Tail != "last line" || strings.Join(e.Argv, " ") != "safe-ag cost agent-x" || e.TS == 0 {
+		t.Fatalf("entry=%+v", e)
+	}
+}
+
+func TestCommandLogCap(t *testing.T) {
+	r := &Runner{Bin: "safe-ag", Exec: fakeExec("ok", "", nil)}
+	for i := 0; i < cmdLogCap+50; i++ {
+		_, _ = r.Run(context.Background(), "list")
+	}
+	if n := len(r.CommandLog()); n != cmdLogCap {
+		t.Fatalf("ring cap: want %d, got %d", cmdLogCap, n)
+	}
+}
+
+func TestTailLinePrefersStderrOnError(t *testing.T) {
+	r := &Runner{Bin: "safe-ag", Exec: fakeExec("", "boom: bad thing", errors.New("exit 1"))}
+	_, _ = r.Run(context.Background(), "pr", "agent-x")
+	log := r.CommandLog()
+	if len(log) != 1 || log[0].OK || log[0].Tail != "boom: bad thing" {
+		t.Fatalf("entry=%+v", log[0])
+	}
+}
+
 func TestOutputParsesJSON(t *testing.T) {
 	r := &Runner{Bin: "safe-ag", Exec: fakeExec(
 		`{"name":"agent-x","status":"exited","last_output":"done: all tests pass"}`, "", nil)}

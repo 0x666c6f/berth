@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Events } from "@wailsio/runtime";
 import { useStore, orderAgents } from "./store";
 import { Sidebar } from "./components/Sidebar";
@@ -11,6 +11,7 @@ import { CostView } from "./components/CostView";
 import { Palette } from "./components/Palette";
 import { VMControl } from "./components/VMControl";
 import { Toasts } from "./components/Toasts";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { EmptyState } from "./components/EmptyState";
 import { AgentService } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import type { Agent } from "./types";
@@ -25,6 +26,7 @@ const isTyping = (t: EventTarget | null) =>
 
 export default function App() {
   const { setAgents, applyEvent, setVM, select, setTab, view, selected, agents, needsYou } = useStore();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     AgentService.Agents().then((a: Agent[] | null) => setAgents(a ?? []));
@@ -58,6 +60,9 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return;
+      // `?` toggles the shortcut cheat sheet (guarded above so it never fires
+      // while typing into a field).
+      if (e.key === "?") { e.preventDefault(); setHelpOpen((v) => !v); return; }
       const s = useStore.getState();
       const order = orderAgents(s.agents);
       if (e.metaKey && e.key >= "1" && e.key <= "9") {
@@ -106,6 +111,7 @@ export default function App() {
       </div>
       <Palette />
       <Toasts />
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

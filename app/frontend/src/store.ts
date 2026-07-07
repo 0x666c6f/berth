@@ -18,6 +18,24 @@ export function orderAgents(agents: Agent[]): Agent[] {
 
 let toastSeq = 0;
 let spawnSeq = 0;
+
+const TOAST_CAP = 5;
+type Toast = { id: number; text: string; kind: ToastKind };
+// Cap the toast stack without ever evicting a pending toast — dropping one
+// would strand its run()/finish() update (it would target a toast that no
+// longer exists, so success/error feedback silently vanishes). Evict the
+// oldest *finished* toasts first; if everything is still pending, keep them
+// all (temporarily exceeding the cap).
+function capToasts(list: Toast[]): Toast[] {
+  const excess = list.length - TOAST_CAP;
+  if (excess <= 0) return list;
+  let removed = 0;
+  return list.filter((t) => {
+    if (removed >= excess || t.kind === "pending") return true;
+    removed++;
+    return false;
+  });
+}
 const NEEDS = new Set(["needs-auth", "stuck", "blocked"]);
 const REVIEW = new Set(["ready-for-review", "ready-for-pr"]);
 
@@ -98,15 +116,18 @@ export const useStore = create<State>()((set) => ({
       else if (status === "info") delete reviewReady[container];
       return { needsYou, reviewReady };
     }),
-  select: (selected) =>
-    set((s) => {
-      // Default tab follows the agent's state: terminal for running,
-      // output for stopped (attach would fail).
-      const a = s.agents.find((x) => x.Name === selected);
-      // Selecting an agent closes its split pane: the main pane and a split
-      // must never attach the same tmux session twice.
-      return { selected, splits: s.splits.filter((n) => n !== selected), tab: a && !a.Running ? "output" : "terminal" };
-    }),
+  select: (selected) => {
+    const s = useStore.getState();
+    // Selecting an agent closes its split pane: the main pane and a split must
+    // never attach the same tmux session twice. Flag it so we can tell the user
+    // why their split just disappeared (otherwise it looks like a glitch).
+    const closingSplit = selected != null && s.splits.includes(selected);
+    // Default tab follows the agent's state: terminal for running, output for
+    // stopped (attach would fail).
+    const a = s.agents.find((x) => x.Name === selected);
+    set({ selected, splits: s.splits.filter((n) => n !== selected), tab: a && !a.Running ? "output" : "terminal" });
+    if (closingSplit) useStore.getState().toast("split closed — same agent now in main pane");
+  },
   toggleSplit: (name) =>
     set((s) => ({
       splits: s.splits.includes(name) ? s.splits.filter((n) => n !== name) : [...s.splits, name],
@@ -118,12 +139,11 @@ export const useStore = create<State>()((set) => ({
       if (s.toasts.some((t) => t.text === text)) return {};
       const id = ++toastSeq;
       setTimeout(() => useStore.getState().dismissToast(id), 8000);
-      const toasts = [...s.toasts, { id, text, kind: "ok" as ToastKind }];
-      return { toasts: toasts.slice(-5) };
+      return { toasts: capToasts([...s.toasts, { id, text, kind: "ok" as ToastKind }]) };
     }),
   run: async (label, p) => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, text: label, kind: "pending" as ToastKind }].slice(-5) }));
+    set((s) => ({ toasts: capToasts([...s.toasts, { id, text: label, kind: "pending" as ToastKind }]) }));
     const finish = (text: string, kind: ToastKind, ttl: number) => {
       set((s) => ({ toasts: s.toasts.map((t) => (t.id === id ? { ...t, text, kind } : t)) }));
       setTimeout(() => useStore.getState().dismissToast(id), ttl);

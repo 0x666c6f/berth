@@ -4,6 +4,9 @@ export interface Agent {
   Activity: string; State: string; StateReason: string;
   CPU: string; Memory: string; NetIO: string; PIDs: string;
   SSH: string; Auth: string; GHAuth: string; Docker: string; NetworkMode: string;
+  // Added by poll.Agent in parallel; optional so the UI still typechecks and
+  // renders if a snapshot predates the field (use `a.Prompt` defensively).
+  Prompt?: string; MaxCost?: string;
 }
 export type AgentStatus = "working" | "needs-you" | "idle" | "review" | "failed" | "stopped";
 export type View = "agents" | "projects" | "fleet" | "timeline" | "cost" | "spawn";
