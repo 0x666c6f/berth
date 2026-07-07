@@ -9,7 +9,7 @@ import { PipelinesView } from "./components/PipelinesView";
 import { Timeline } from "./components/Timeline";
 import { CostView } from "./components/CostView";
 import { Palette } from "./components/Palette";
-import { VMBanner } from "./components/VMBanner";
+import { VMControl } from "./components/VMControl";
 import { Toasts } from "./components/Toasts";
 import { EmptyState } from "./components/EmptyState";
 import { AgentService } from "../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
@@ -86,19 +86,23 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
-      <VMBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="min-w-0 flex-1">
-          {view === "agents" && (selected
-            ? <Workspace key={selected} name={selected} />
-            : <EmptyState />)}
-          {view === "spawn" && <SpawnForm />}
-          {view === "projects" && <ProjectsView />}
-          {view === "fleet" && <PipelinesView />}
-          {view === "timeline" && <Timeline />}
-          {view === "cost" && <CostView />}
-        </main>
+        {/* VM bar lives inside the content column so it stops at the sidebar
+            edge instead of running underneath the left menu. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main className="min-h-0 min-w-0 flex-1">
+            {view === "agents" && (selected
+              ? <Workspace key={selected} name={selected} />
+              : <EmptyState />)}
+            {view === "spawn" && <SpawnForm />}
+            {view === "projects" && <ProjectsView />}
+            {view === "fleet" && <PipelinesView />}
+            {view === "timeline" && <Timeline />}
+            {view === "cost" && <CostView />}
+          </main>
+          <VMControl />
+        </div>
       </div>
       <Palette />
       <Toasts />

@@ -3,7 +3,6 @@ import { Bell, Bot, CircleDollarSign, Ellipsis, FolderGit2, Workflow } from "luc
 import { useStore, statusFor } from "../store";
 import { StatusDot } from "./StatusDot";
 import { QuotaBar } from "./QuotaBar";
-import { VMControl } from "./VMControl";
 import { AgentService } from "../../bindings/github.com/0x666c6f/safe-agentic/app/internal/svc";
 import type { Agent, View } from "../types";
 
@@ -173,9 +172,6 @@ export function Sidebar() {
           </div>
         )}
       </div>
-
-      {/* VM health + lifecycle controls */}
-      <VMControl />
 
       {/* Quota remaining for Claude + Codex */}
       <QuotaBar />
