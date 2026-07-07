@@ -13,7 +13,7 @@ export function SpawnForm() {
   const [busy, setBusy] = useState<"" | "spawn" | "dry">("");
   const [req, setReq] = useState({
     Agent: "claude", Name: "", Repo: "", Prompt: "", Template: "", Network: "",
-    Memory: "", CPUs: "", MaxCost: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
+    Memory: "", CPUs: "", MaxCost: "", WorktreeDir: "", SSH: true, ReuseAuth: false, Worktree: false, DryRun: false,
   });
   const [templates, setTemplates] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
@@ -41,7 +41,7 @@ export function SpawnForm() {
     }
     // Optimistic: show a "starting…" row and jump to the list right away — the
     // real container only lands on the next poll, so this bridges the gap.
-    const label = `${req.Agent}${req.Repo ? " · " + shortRepo(req.Repo) : ""}`;
+    const label = `${req.Agent}${req.Repo ? " · " + shortRepo(req.Repo) : req.WorktreeDir ? " · " + (req.WorktreeDir.split("/").pop() || "worktree") : ""}`;
     const pid = addPendingSpawn(label);
     setView("agents");
     try {
@@ -70,8 +70,21 @@ export function SpawnForm() {
       </div>
       <input className="input" placeholder="name (optional — auto-generated if empty)" value={req.Name}
         onChange={(e) => set("Name", e.target.value)} />
-      <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
-        onChange={(e) => set("Repo", e.target.value)} />
+      {!req.Worktree && (
+        <input className="input" placeholder="repo URL (optional — empty gives a blank workspace)" value={req.Repo}
+          onChange={(e) => set("Repo", e.target.value)} />
+      )}
+      {req.Worktree && (
+        <div className="flex items-center gap-2">
+          <button className="btn shrink-0" onClick={() =>
+            AgentService.PickFolder().then((p: string) => p && set("WorktreeDir", p)).catch(() => {})
+          }>Choose local repo…</button>
+          <span className={`min-w-0 flex-1 truncate text-xs ${req.WorktreeDir ? "text-neutral-300" : "text-yellow-500"}`}
+            title={req.WorktreeDir}>
+            {req.WorktreeDir || "worktree mode checks out a git worktree of a LOCAL repo — pick its folder"}
+          </span>
+        </div>
+      )}
       {req.Repo.trim() && !/[/:.]/.test(req.Repo) && (
         <div className="text-xs text-yellow-500">
           <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />"{req.Repo}" doesn't look like a repo URL — the agent will refuse to clone it. Leave empty for a blank workspace.
@@ -97,7 +110,14 @@ export function SpawnForm() {
         <option value="">no template</option>
         {templates.map((t) => <option key={t} value={t}>{t}</option>)}
       </select>
-      <div className="flex gap-4"><Check k="SSH" label="--ssh" /><Check k="ReuseAuth" label="--reuse-auth" /><Check k="Worktree" label="--worktree" /></div>
+      <div className="flex gap-4">
+        <Check k="SSH" label="--ssh" />
+        <Check k="ReuseAuth" label="--reuse-auth" />
+        <label className="flex items-center gap-2 text-sm" title="Work on a git worktree of a local checkout instead of cloning a repo URL (needs: safe-ag setup --enable-worktrees)">
+          <input type="checkbox" checked={req.Worktree}
+            onChange={(e) => setReq((r) => ({ ...r, Worktree: e.target.checked, ...(e.target.checked ? { Repo: "" } : { WorktreeDir: "" }) }))} /> --worktree
+        </label>
+      </div>
       <div className="flex gap-2">
         <input className="input flex-1" placeholder="network (blank = dedicated)" value={req.Network} onChange={(e) => set("Network", e.target.value)} />
         <input className="input w-24" placeholder="memory" value={req.Memory} onChange={(e) => set("Memory", e.target.value)} />
@@ -109,7 +129,10 @@ export function SpawnForm() {
         <button className="btn disabled:opacity-50" disabled={!!busy} onClick={() => submit(true)}>
           {busy === "dry" ? "Validating…" : "Dry-run preview"}
         </button>
-        <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50" disabled={!!busy} onClick={() => submit(false)}>
+        <button className="btn bg-green-800 hover:bg-green-700 disabled:opacity-50"
+          disabled={!!busy || (req.Worktree && !req.WorktreeDir)}
+          title={req.Worktree && !req.WorktreeDir ? "pick the local repo folder first" : ""}
+          onClick={() => submit(false)}>
           {busy === "spawn" ? "Spawning…" : "Spawn"}
         </button>
       </div>

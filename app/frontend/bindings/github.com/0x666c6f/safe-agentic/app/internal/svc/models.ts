@@ -58,6 +58,11 @@ export interface SpawnRequest {
      * USD; engine kills the agent past this budget
      */
     "MaxCost": string;
+
+    /**
+     * local checkout for --worktree (the CLI worktrees its cwd)
+     */
+    "WorktreeDir": string;
     "SSH": boolean;
     "ReuseAuth": boolean;
     "Worktree": boolean;

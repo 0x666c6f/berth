@@ -25,6 +25,7 @@ func (e *CLIError) Unwrap() error { return e.Err }
 type Runner struct {
 	Bin       string
 	Exec      func(ctx context.Context, name string, args ...string) (stdout, stderr []byte, err error)
+	ExecIn    func(ctx context.Context, dir, name string, args ...string) (stdout, stderr []byte, err error)
 	OnCommand func(argv []string)
 }
 
@@ -47,6 +48,34 @@ func (r *Runner) Run(ctx context.Context, args ...string) ([]byte, error) {
 		r.OnCommand(argv)
 	}
 	stdout, stderr, err := r.Exec(ctx, r.Bin, args...)
+	if err != nil {
+		return stdout, &CLIError{Argv: argv, Stderr: string(stderr), Err: err}
+	}
+	return stdout, nil
+}
+
+// RunIn is Run with the child's working directory set — worktree spawns need
+// the CLI to run inside the source checkout it should git-worktree from.
+func (r *Runner) RunIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if dir == "" {
+		return r.Run(ctx, args...)
+	}
+	execIn := r.ExecIn
+	if execIn == nil {
+		execIn = func(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error) {
+			cmd := exec.CommandContext(ctx, name, args...)
+			cmd.Dir = dir
+			var out, errb bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &out, &errb
+			err := cmd.Run()
+			return out.Bytes(), errb.Bytes(), err
+		}
+	}
+	argv := append([]string{r.Bin}, args...)
+	if r.OnCommand != nil {
+		r.OnCommand(argv)
+	}
+	stdout, stderr, err := execIn(ctx, dir, r.Bin, args...)
 	if err != nil {
 		return stdout, &CLIError{Argv: argv, Stderr: string(stderr), Err: err}
 	}

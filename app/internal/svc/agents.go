@@ -273,6 +273,7 @@ func (s *AgentService) PipelineRun(name string, vars map[string]string, dryRun b
 type SpawnRequest struct {
 	Agent, Name, Repo, Prompt, Template, Network, Memory, CPUs string
 	MaxCost                                                    string // USD; engine kills the agent past this budget
+	WorktreeDir                                                string // local checkout for --worktree (the CLI worktrees its cwd)
 	SSH, ReuseAuth, Worktree, DryRun, NoSeedAuth, NoGHAuth     bool
 }
 
@@ -342,5 +343,20 @@ func spawnArgs(req SpawnRequest) []string {
 }
 
 func (s *AgentService) Spawn(req SpawnRequest) (string, error) {
+	if req.Worktree {
+		// --worktree checks out a git worktree of the CLI's cwd; a repo URL is
+		// meaningless there and the CLI rejects the combination.
+		if strings.TrimSpace(req.WorktreeDir) == "" {
+			return "", fmt.Errorf("worktree spawn needs a local repo folder — pick one in the form")
+		}
+		req.Repo = ""
+		ctx, cancel := s.ctx()
+		defer cancel()
+		out, err := s.Runner.RunIn(ctx, req.WorktreeDir, spawnArgs(req)...)
+		if s.Poller != nil {
+			s.Poller.ForceRefresh()
+		}
+		return string(out), err
+	}
 	return s.run(spawnArgs(req)...)
 }
