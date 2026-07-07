@@ -105,6 +105,14 @@ The image pre-bakes a static-analysis tool set, since `api-only` blocks `apt`/`p
 
 This is static analysis, not detonation: the tools inspect file structure, strings, metadata, and embedded content without running anything. `api-only`'s network narrowing (above) does not sandbox execution — never execute or open the files under analysis.
 
+### Evidence mount
+
+`berth spawn --evidence <local-path>` (also `berth run --evidence`) is for analyzing suspicious local files that don't live in a repo. berth reads the host path directly, computes a sha256 manifest, and streams the files into a per-container Docker volume (`<container>-evidence`) mounted **read-only** at `/evidence`. There is no host bind mount and no git involved — the VM stays `home-mount=none`.
+
+The manifest (per-file sha256, size, and relative path) is written to the append-only audit log as an `evidence-ingest` entry before the container launches, so it survives even if a later step fails — that's the chain of custody, viewable with `berth audit`. `--evidence` defaults `--network` to `api-only` when no network is given (an explicit `--network` wins, same chokepoint `--forensic` uses). The evidence volume is removed when the container is stopped (`berth stop`).
+
+**The read-only mount is not a noexec mount.** It stops the agent (or a malicious file) from tampering with or overwriting the evidence, preserving chain of custody — it does not prevent execution. Execution risk is contained the same way as the rest of the container: `api-only` egress plus `cap-drop ALL` and `no-new-privileges`. Treat everything under `/evidence` as untrusted data and never execute it.
+
 ### The worktree mount trade-off
 
 By default the machine is created with `--home-mount none`: the host home is never shared with the VM, so even a VM-root compromise or Docker escape cannot reach host files.

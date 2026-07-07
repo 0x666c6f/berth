@@ -124,6 +124,7 @@ Flags:
 | `--docker-socket` | bool | mount the VM Docker socket directly |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
 | `--ephemeral-auth` | bool | use a per-container auth volume |
+| `--evidence` | string | mount a host file/dir read-only at `/evidence`; records a sha256 manifest and defaults `--network` to `api-only` |
 | `--fleet-volume` | string | shared fleet volume name |
 | `--forensic` | bool | use the forensic tool image (`berth:forensic`) and default `--network` to `api-only`; requires `berth update --forensic` first |
 | `--identity` | string | git identity in `Name <email>` form |
@@ -175,6 +176,14 @@ berth spawn claude --forensic --template forensic-triage --repo https://github.c
 ```
 
 `--forensic` selects the `berth:forensic` image (built once with `berth update --forensic`) and defaults `--network` to `api-only` when no network is given (an explicit `--network` wins). It fails closed with a hint to run `berth update --forensic` if that image hasn't been built yet. See [Security — Forensic triage](../security.md#forensic-triage).
+
+Evidence mount:
+
+```bash
+berth spawn claude --evidence ./suspicious-sample --forensic --template forensic-triage
+```
+
+`--evidence <path>` streams a host file or directory into a per-container Docker volume and mounts it read-only at `/evidence` — no host bind mount, no git. berth records a sha256 manifest of the ingested files in the audit log as an `evidence-ingest` entry (`berth audit`), and defaults `--network` to `api-only` when no network is given (an explicit `--network` wins). The volume is removed when the container is stopped. See [Security — Evidence mount](../security.md#evidence-mount).
 
 Worktree mode:
 
@@ -248,6 +257,7 @@ Flags:
 | `--cpus` | string | CPU limit |
 | `--dry-run` | bool | print the resolved launch command only; sensitive env and labels are redacted |
 | `--ephemeral-auth` | bool | use a per-container throwaway auth volume |
+| `--evidence` | string | mount a host file/dir read-only at `/evidence`; records a sha256 manifest and defaults `--network` to `api-only` |
 | `--forensic` | bool | use the forensic tool image (`berth:forensic`) and default `--network` to `api-only`; requires `berth update --forensic` first |
 | `--instructions` | string | task instructions |
 | `--max-cost` | string | cost budget |
