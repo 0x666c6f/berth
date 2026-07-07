@@ -284,6 +284,10 @@ fi
 # =============================================================================
 step 5 "Configuring egress guardrails..."
 as_root iptables -nL DOCKER-USER >/dev/null 2>&1 || as_root iptables -N DOCKER-USER
+# Drop the pre-rename chain if this VM was set up as safe-agentic
+as_root iptables -D DOCKER-USER -j SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -F SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
+as_root iptables -X SAFE_AGENTIC_EGRESS >/dev/null 2>&1 || true
 as_root iptables -N BERTH_EGRESS >/dev/null 2>&1 || true
 as_root iptables -F BERTH_EGRESS
 as_root iptables -C DOCKER-USER -j BERTH_EGRESS >/dev/null 2>&1 \
