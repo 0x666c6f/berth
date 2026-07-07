@@ -182,7 +182,6 @@ step 3 "Installing Docker dependencies..."
 
 case "${ID:-}" in
   alpine)
-    as_root apk update
     # tinyproxy lives in Alpine's community repo; enable it if not already present.
     as_root sh -c 'grep -q "/community" /etc/apk/repositories || echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/community" >> /etc/apk/repositories'
     as_root apk update
@@ -295,12 +294,12 @@ step 5 "Configuring api-only egress proxy..."
 as_root mkdir -p /etc/tinyproxy
 
 as_root tee /etc/tinyproxy/allowlist >/dev/null <<'ALEOF'
-api\.anthropic\.com
-statsig\.anthropic\.com
-sentry\.io
-github\.com
-codeload\.github\.com
-objects\.githubusercontent\.com
+^api\.anthropic\.com$
+^statsig\.anthropic\.com$
+^sentry\.io$
+^github\.com$
+^codeload\.github\.com$
+^objects\.githubusercontent\.com$
 ALEOF
 
 as_root tee /etc/tinyproxy/tinyproxy.conf >/dev/null <<'TPEOF'
