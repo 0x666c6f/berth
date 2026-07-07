@@ -20,12 +20,14 @@ jobs:
           node-version: 22
       - name: Install wails3
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.112
+      # Frontend first: the Go module embeds frontend/dist, so a clean
+      # checkout fails `go test` until the bundle exists.
+      - name: Frontend deps + tests + bundle
+        working-directory: app/frontend
+        run: npm ci && npx vitest run && npm run build
       - name: Go tests
         working-directory: app
         run: go test ./...
-      - name: Frontend deps + tests
-        working-directory: app/frontend
-        run: npm ci && npx vitest run
       - name: Build
         working-directory: app
         run: wails3 build

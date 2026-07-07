@@ -122,8 +122,9 @@ ensure_claude_auth() {
   # Live OAuth credentials: refresh on EVERY start so a re-logged-in host
   # replaces an expired token in a reused-auth volume. This IS the login.
   if [ -n "${SAFE_AGENTIC_CLAUDE_CREDS_B64:-}" ] && [ -w "$claude_dir" ]; then
-    echo "$SAFE_AGENTIC_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null \
-      && chmod 600 "$claude_dir/.credentials.json" 2>/dev/null || true
+    if echo "$SAFE_AGENTIC_CLAUDE_CREDS_B64" | base64 -d > "$claude_dir/.credentials.json" 2>/dev/null; then
+      chmod 600 "$claude_dir/.credentials.json" 2>/dev/null || true
+    fi
   fi
 
   [ -n "${SAFE_AGENTIC_CLAUDE_AUTH_B64:-}" ] || return 0
