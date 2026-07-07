@@ -1012,6 +1012,14 @@ func confirmInteractiveSpawn(opts SpawnOpts, resolved spawnResolved) error {
 	if !opts.Interactive || opts.Yes || opts.DryRun {
 		return nil
 	}
+	// Prompt humans only. Programmatic callers (desktop app, safe-ag-claude/
+	// codex wrappers, scripts) run with non-TTY stdin and explicitly passed
+	// the risky flags they want — for them the risk summary still prints, but
+	// hard-failing here would break every existing automation. Destructive ops
+	// (stop --all, cleanup) keep the strict non-TTY --yes requirement.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil
+	}
 	notices := risk.SpawnNotices(spawnRiskInput(opts, resolved))
 	if len(notices) == 0 {
 		return nil
