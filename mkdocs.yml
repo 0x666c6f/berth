@@ -7,8 +7,8 @@ repo_name: 0x666c6f/berth
 theme:
   name: material
   custom_dir: docs/overrides
-  logo: assets/brand/berth-mark-dark.svg
-  favicon: assets/brand/favicon.ico
+  logo: assets/brand/berth-mark-b2-dark.svg
+  favicon: assets/brand/favicon-b2.ico
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate

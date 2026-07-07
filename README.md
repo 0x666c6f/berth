@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/berth-readme-header-dark-800x200.png">
-    <img src="docs/assets/brand/berth-readme-header-light-800x200.png" alt="berth" width="400">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/berth-readme-header-b2-dark-800x200.png">
+    <img src="docs/assets/brand/berth-readme-header-b2-light-800x200.png" alt="berth" width="400">
   </picture>
 </p>
 
