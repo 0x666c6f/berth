@@ -73,7 +73,7 @@ seed_auth = false
 
 ### api-only egress mode
 
-`--network api-only` is the recommended mode for analyzing untrusted or suspicious file content. The container's direct internet egress is dropped by an iptables `REJECT` on its bridge (see [Architecture](architecture.md#api-only-egress-mode)) — the container's own DNS queries are forwarded traffic and are dropped by that same rule, and all HTTP(S) traffic must instead go through a VM-side `tinyproxy` instance reachable only via the injected `HTTPS_PROXY=http://berth-proxy:8119`. That proxy is default-deny and forwards only to an exact-host allowlist:
+`--network api-only` is the recommended mode for analyzing untrusted or suspicious file content. The container's direct internet egress is dropped by an iptables `REJECT` on its bridge (see [Architecture](architecture.md#api-only-egress-mode)). External DNS is closed separately: Docker's embedded resolver forwards queries from the VM's own network namespace, which would bypass the bridge `REJECT`, so the container's resolver upstream is pointed at a blackhole (`--dns 127.0.0.1`) — external name resolution fails while `/etc/hosts` entries (the proxy) still resolve. All HTTP(S) traffic must go through a VM-side `tinyproxy` instance reachable only via the injected `HTTPS_PROXY=http://berth-proxy:8119`; the proxy resolves allowlisted targets VM-side, so the container needs no resolver of its own. That proxy is default-deny and forwards only to an exact-host allowlist:
 
 - `api.anthropic.com`
 - `statsig.anthropic.com`
