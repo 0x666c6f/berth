@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -320,6 +321,112 @@ func TestTartRunner_InjectOffline_RefusesWhenRunning(t *testing.T) {
 		if c[0] == "hdiutil" {
 			t.Fatalf("must not build sample image while guest is running, calls: %v", spy.calls)
 		}
+	}
+}
+
+// --- TartRunner: Collect must not follow guest-planted symlinks ---
+
+// TestTartRunner_Collect_SkipsSymlinksAndNeverReadsThroughThem is the key
+// containment test for this fix: the artifacts dir is guest-writable (the
+// --dir=out: mount), so a detonating sample can plant a symlink there that
+// points at an arbitrary host path. Collect must skip it entirely — never
+// dereference it — or the guest gets a host file-read primitive.
+func TestTartRunner_Collect_SkipsSymlinksAndNeverReadsThroughThem(t *testing.T) {
+	spy := &spyCmdRunner{listJSON: []byte(`[{"Name":"run-1","State":"stopped"}]`)}
+	r := NewTartRunner(t.TempDir())
+	r.cmd = spy
+
+	artifactsDir := filepath.Join(r.WorkDir, "run-1", "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "report.json"), []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatalf("write report.json: %v", err)
+	}
+
+	// Host secret that lives OUTSIDE the artifacts dir entirely.
+	secretPath := filepath.Join(t.TempDir(), "secret.txt")
+	const secretContents = "top-secret-host-data"
+	if err := os.WriteFile(secretPath, []byte(secretContents), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	// Guest-planted symlink, named like a plausible artifact, pointing at
+	// the host secret above.
+	if err := os.Symlink(secretPath, filepath.Join(artifactsDir, "evil.json")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	destDir := t.TempDir()
+	files, err := r.Collect(context.Background(), "run-1", destDir)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if len(files) != 1 || filepath.Base(files[0]) != "report.json" {
+		t.Fatalf("expected only report.json collected, got %v", files)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "evil.json")); !os.IsNotExist(err) {
+		t.Fatalf("evil.json symlink must not be collected, stat err = %v", err)
+	}
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatalf("reading destDir: %v", err)
+	}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(destDir, e.Name()))
+		if err != nil {
+			t.Fatalf("reading collected %s: %v", e.Name(), err)
+		}
+		if strings.Contains(string(data), secretContents) {
+			t.Fatalf("symlink target was followed: secret leaked into collected artifact %s", e.Name())
+		}
+	}
+}
+
+// --- TartRunner: Run must use the gateway captured at ConfigureIsolatedNet time ---
+
+func TestTartRunner_Run_UsesGatewayCapturedAtConfigureTime(t *testing.T) {
+	spy := &spyCmdRunner{}
+	r := NewTartRunner(t.TempDir())
+	r.cmd = spy
+	r.AllowedIsolatedGateway = "isolated-bridge0"
+
+	if _, err := r.ConfigureIsolatedNet(context.Background(), "run-1", "isolated-bridge0"); err != nil {
+		t.Fatalf("ConfigureIsolatedNet: %v", err)
+	}
+
+	// Regression: mutate the shared field after ConfigureIsolatedNet. Run
+	// must not pick this up — it must use the gateway captured at
+	// ConfigureIsolatedNet time, so the value ValidateIsolated guarded and
+	// the value `tart run` consumes can never diverge.
+	r.AllowedIsolatedGateway = "attacker-bridge1"
+
+	if err := r.Run(context.Background(), "run-1", time.Second); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var runCall []string
+	for _, c := range spy.calls {
+		if len(c) > 1 && c[0] == "tart" && c[1] == "run" {
+			runCall = c
+		}
+	}
+	if runCall == nil {
+		t.Fatalf("expected a `tart run` invocation, calls: %v", spy.calls)
+	}
+	wantArg := "--net-bridged=isolated-bridge0"
+	badArg := "--net-bridged=attacker-bridge1"
+	found := false
+	for _, a := range runCall {
+		if a == badArg {
+			t.Fatalf("Run used the mutated shared gateway field instead of the captured value: %v", runCall)
+		}
+		if a == wantArg {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected tart run args to contain %q (captured gateway), got %v", wantArg, runCall)
 	}
 }
 

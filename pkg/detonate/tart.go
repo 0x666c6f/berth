@@ -60,13 +60,20 @@ type TartRunner struct {
 
 	mu   sync.Mutex
 	nets map[string]NetAttachment
+	// gateways captures, per run, the exact gateway string ConfigureIsolatedNet
+	// validated against AllowedIsolatedGateway. Run must build its command
+	// from this captured value — never from the mutable AllowedIsolatedGateway
+	// field — so the value the guard checked and the value the command uses
+	// can never diverge, even if AllowedIsolatedGateway changes afterward.
+	gateways map[string]string
 }
 
 func NewTartRunner(workDir string) *TartRunner {
 	return &TartRunner{
-		cmd:     execCmdRunner{},
-		WorkDir: workDir,
-		nets:    make(map[string]NetAttachment),
+		cmd:      execCmdRunner{},
+		WorkDir:  workDir,
+		nets:     make(map[string]NetAttachment),
+		gateways: make(map[string]string),
 	}
 }
 
@@ -148,6 +155,7 @@ func (r *TartRunner) ConfigureIsolatedNet(_ context.Context, run, gw string) (Ne
 	n := NetAttachment{Mode: "isolated", HasUplink: false}
 	r.mu.Lock()
 	r.nets[run] = n
+	r.gateways[run] = gw
 	r.mu.Unlock()
 	return n, nil
 }
@@ -155,6 +163,7 @@ func (r *TartRunner) ConfigureIsolatedNet(_ context.Context, run, gw string) (Ne
 func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration) error {
 	r.mu.Lock()
 	n, ok := r.nets[run]
+	gw := r.gateways[run]
 	r.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("containment violation: no network attachment configured for run %q; call ConfigureIsolatedNet first", run)
@@ -173,7 +182,10 @@ func (r *TartRunner) Run(ctx context.Context, run string, timeout time.Duration)
 	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
 		return fmt.Errorf("preparing artifacts dir: %w", err)
 	}
-	_, err := r.cmd.Run(runCtx, "tart", buildTartRunArgs(run, r.AllowedIsolatedGateway, artifactsDir)...)
+	// Use the gateway captured at ConfigureIsolatedNet time (gw), not
+	// r.AllowedIsolatedGateway, so the value ValidateIsolated just guarded
+	// is the exact value that reaches the command.
+	_, err := r.cmd.Run(runCtx, "tart", buildTartRunArgs(run, gw, artifactsDir)...)
 	return err
 }
 
@@ -240,7 +252,15 @@ func (r *TartRunner) Collect(ctx context.Context, run, destDir string) ([]string
 
 	var collected []string
 	for _, e := range entries {
-		if e.IsDir() {
+		// srcDir is the guest-writable --dir=out: mount: a sample can plant
+		// a symlink here (e.g. named report.json) pointing at any host path.
+		// e.Type() reflects the raw directory entry, not a followed stat, so
+		// it flags a symlink without ever resolving it. Skip anything that
+		// isn't a plain regular file — symlinks, dirs, devices, sockets,
+		// pipes — so the os.ReadFile below can never become a guest-to-host
+		// file-read primitive. e.Name() is always a bare filename (no path
+		// separators), so the Join below can't escape srcDir either.
+		if !e.Type().IsRegular() {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
@@ -277,6 +297,7 @@ func (r *TartRunner) Destroy(ctx context.Context, run string) error {
 	_, err := r.cmd.Run(ctx, "tart", buildTartDeleteArgs(run)...)
 	r.mu.Lock()
 	delete(r.nets, run)
+	delete(r.gateways, run)
 	r.mu.Unlock()
 	return err
 }
