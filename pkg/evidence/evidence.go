@@ -40,7 +40,10 @@ type file struct {
 // node type (symlink, device, socket, ...) at the root is an error. Non-
 // regular nodes encountered while walking a directory are skipped.
 func collect(root string) ([]file, error) {
-	info, err := os.Lstat(root)
+	// Stat (not Lstat) so a symlinked root itself is followed to its target;
+	// inner symlinks encountered while walking a directory are still skipped
+	// below.
+	info, err := os.Stat(root)
 	if err != nil {
 		return nil, fmt.Errorf("evidence root %q: %w", root, err)
 	}
@@ -50,14 +53,18 @@ func collect(root string) ([]file, error) {
 	case info.Mode().IsRegular():
 		files = append(files, file{relPath: filepath.Base(root), fullPath: root})
 	case info.IsDir():
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		walkRoot := root
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			walkRoot = r
+		}
+		err := filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if !d.Type().IsRegular() {
 				return nil // skip dirs, symlinks, devices, sockets
 			}
-			rel, err := filepath.Rel(root, path)
+			rel, err := filepath.Rel(walkRoot, path)
 			if err != nil {
 				return err
 			}

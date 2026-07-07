@@ -1222,6 +1222,26 @@ func TestCleanupAuthRemovesSharedAndIsolatedAuthVolumes(t *testing.T) {
 	}
 }
 
+func TestCleanupSweepsEvidenceVolumesRegardlessOfAuthFlag(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	origCleanupAuth := cleanupAuth
+	cleanupAuth = false // evidence sweep must not be gated on --auth
+	cleanupYes = true
+	defer func() { cleanupAuth = origCleanupAuth; cleanupYes = false }()
+
+	fake.SetResponse("docker volume ls --filter label=berth.type=evidence --format {{.Name}}", "agent-claude-test-evidence\n")
+
+	if err := runCleanup(cleanupCmd, nil); err != nil {
+		t.Fatalf("runCleanup() error = %v", err)
+	}
+
+	if got := fake.CommandsMatching("docker volume rm agent-claude-test-evidence"); len(got) == 0 {
+		t.Fatalf("missing evidence volume cleanup command")
+	}
+}
+
 // ─── peek ─────────────────────────────────────────────────────────────────────
 
 func TestPeekCommand(t *testing.T) {

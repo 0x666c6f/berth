@@ -92,6 +92,62 @@ func TestBuild_SingleFile(t *testing.T) {
 	}
 }
 
+func TestBuild_SymlinkedDirRoot(t *testing.T) {
+	realDir := t.TempDir()
+	data := []byte("hello world")
+	if err := os.WriteFile(filepath.Join(realDir, "a.txt"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(t.TempDir(), "link-to-samples")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	want, err := Build(realDir)
+	if err != nil {
+		t.Fatalf("Build(realDir): %v", err)
+	}
+	got, err := Build(link)
+	if err != nil {
+		t.Fatalf("Build(link): %v", err)
+	}
+	if len(got.Entries) != len(want.Entries) {
+		t.Fatalf("len(Entries) = %d, want %d", len(got.Entries), len(want.Entries))
+	}
+	for i := range want.Entries {
+		if got.Entries[i].Path != want.Entries[i].Path || got.Entries[i].SHA256 != want.Entries[i].SHA256 {
+			t.Errorf("Entries[%d] = %+v, want %+v", i, got.Entries[i], want.Entries[i])
+		}
+	}
+}
+
+func TestBuild_SymlinkedFileRoot(t *testing.T) {
+	realDir := t.TempDir()
+	data := []byte("single file contents")
+	realFile := filepath.Join(realDir, "evidence.log")
+	if err := os.WriteFile(realFile, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(t.TempDir(), "link-to-file")
+	if err := os.Symlink(realFile, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	m, err := Build(link)
+	if err != nil {
+		t.Fatalf("Build(link): %v", err)
+	}
+	if len(m.Entries) != 1 {
+		t.Fatalf("len(Entries) = %d, want 1", len(m.Entries))
+	}
+	want := Entry{Path: "link-to-file", SHA256: sha256Hex(t, data), Size: int64(len(data))}
+	if m.Entries[0] != want {
+		t.Errorf("Entries[0] = %+v, want %+v", m.Entries[0], want)
+	}
+}
+
 func TestBuild_NonexistentPath(t *testing.T) {
 	_, err := Build(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {

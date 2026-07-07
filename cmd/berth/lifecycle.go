@@ -565,7 +565,17 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	// 5. Prune dangling images
 	exec.Run(ctx, "docker", "image", "prune", "-f")
 
-	// 6. Auth volumes (optional)
+	// 6. Evidence volumes — always swept (not auth, holds untrusted sample
+	// bytes; per-container `berth stop` already removes these, but bulk
+	// cleanup needs its own sweep since it never runs a per-container stop).
+	evidenceOut, _ := exec.Run(ctx, "docker", "volume", "ls",
+		"--filter", "label=berth.type=evidence",
+		"--format", "{{.Name}}")
+	for _, vol := range splitLines(string(evidenceOut)) {
+		exec.Run(ctx, "docker", "volume", "rm", vol)
+	}
+
+	// 7. Auth volumes (optional)
 	if cleanupAuth {
 		volOut, _ := exec.Run(ctx, "docker", "volume", "ls",
 			"--filter", "name=berth-",
