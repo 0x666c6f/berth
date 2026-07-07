@@ -2166,6 +2166,36 @@ func TestUpdateCommand_Full(t *testing.T) {
 	}
 }
 
+func TestUpdateCommand_Forensic(t *testing.T) {
+	fake, cleanup := testSetup(t)
+	defer cleanup()
+
+	fake.SetResponse("docker build", "Successfully built abc123\n")
+
+	updateForensic = true
+	defer func() { updateForensic = false }()
+
+	output := captureOutput(func() {
+		if err := runUpdate(updateCmd, nil); err != nil {
+			t.Fatalf("runUpdate() error = %v", err)
+		}
+	})
+
+	buildCmds := fake.CommandsMatching("docker build")
+	if len(buildCmds) != 1 {
+		t.Fatalf("want 1 build, got %d", len(buildCmds))
+	}
+	joined := strings.Join(buildCmds[0], " ")
+	for _, want := range []string{"-f Dockerfile.forensic", "-t berth:forensic"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("forensic build missing %q: %s", want, joined)
+		}
+	}
+	if !strings.Contains(output, "berth:forensic") {
+		t.Errorf("expected 'berth:forensic' in output, got: %s", output)
+	}
+}
+
 // ─── containerEnvVar ──────────────────────────────────────────────────────────
 
 func TestContainerEnvVar(t *testing.T) {
