@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0x666c6f/berth/pkg/config"
 	"github.com/0x666c6f/berth/pkg/docker"
 	"github.com/0x666c6f/berth/pkg/policy"
 	"github.com/0x666c6f/berth/pkg/vmexec"
@@ -616,6 +617,114 @@ func TestSpawnManagedDoesNotInjectProxy(t *testing.T) {
 	})
 	if strings.Contains(strings.Join(cmd.Build(), " "), "HTTPS_PROXY") {
 		t.Error("managed mode must not inject a proxy")
+	}
+}
+
+// ─── --forensic (forensic tool image, safe-default api-only network) ──────────
+
+func TestSpawnForensicSelectsImageAndDefaultsAPIOnly(t *testing.T) {
+	// image selection
+	r := spawnResolved{ContainerName: "f1", NetworkName: "f1-net", NetworkMode: "api-only", Memory: "8g", CPUs: "4", PIDsLimit: 512, ImageName: "berth:forensic"}
+	cmd := buildSpawnRunCmd(SpawnOpts{AgentType: "claude", Forensic: true}, r)
+	if !strings.Contains(strings.Join(cmd.Build(), " "), "berth:forensic") {
+		t.Error("forensic spawn must use berth:forensic image")
+	}
+}
+
+func TestPrepareSpawnResolved_ForensicSelectsForensicImage(t *testing.T) {
+	resolved, err := prepareSpawnResolved(SpawnOpts{AgentType: "claude", Forensic: true}, config.Config{})
+	if err != nil {
+		t.Fatalf("prepareSpawnResolved() error = %v", err)
+	}
+	if resolved.ImageName != "berth:forensic" {
+		t.Errorf("ImageName = %q, want berth:forensic", resolved.ImageName)
+	}
+}
+
+func TestPrepareSpawnResolved_NonForensicUsesLatestImage(t *testing.T) {
+	resolved, err := prepareSpawnResolved(SpawnOpts{AgentType: "claude"}, config.Config{})
+	if err != nil {
+		t.Fatalf("prepareSpawnResolved() error = %v", err)
+	}
+	if resolved.ImageName != "berth:latest" {
+		t.Errorf("ImageName = %q, want berth:latest", resolved.ImageName)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicDefaultsNetworkAPIOnly(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true}, config.Config{})
+	if opts.Network != policy.NetworkAPIOnly {
+		t.Errorf("Network = %q, want %q", opts.Network, policy.NetworkAPIOnly)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicRespectsExplicitNetwork(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true, Network: "managed"}, config.Config{})
+	if opts.Network != "managed" {
+		t.Errorf("Network = %q, want explicit managed to win", opts.Network)
+	}
+}
+
+func TestApplySpawnConfigDefaults_ForensicRespectsConfigNetworkDefault(t *testing.T) {
+	// A config-level network default already picks the network; the forensic
+	// safe-default must not clobber opts.Network to api-only here — downstream
+	// (prepareSpawnNetwork, spawnPolicyRequest, requireSpawnHostEgress) falls
+	// back to cfg.Defaults.Network on its own when opts.Network is empty.
+	cfg := config.Config{Defaults: config.DefaultsSection{Network: "agent-isolated"}}
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude", Forensic: true}, cfg)
+	if opts.Network != "" {
+		t.Errorf("Network = %q, want empty (config default wins via its own fallback, not an api-only override)", opts.Network)
+	}
+}
+
+func TestApplySpawnConfigDefaults_NonForensicLeavesNetworkEmpty(t *testing.T) {
+	opts := applySpawnConfigDefaults(SpawnOpts{AgentType: "claude"}, config.Config{})
+	if opts.Network != "" {
+		t.Errorf("Network = %q, want empty for non-forensic spawn", opts.Network)
+	}
+}
+
+// ─── requireForensicImage (fail-closed berth:forensic image preflight) ────────
+
+func TestRequireForensicImage_MissingImageFailsClosed(t *testing.T) {
+	fake := vmexec.NewFake() // default: empty output = image not found
+	err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true})
+	if err == nil {
+		t.Fatal("expected error when berth:forensic image is missing, got nil")
+	}
+	if exitCodeFor(err) != exitInfra {
+		t.Errorf("exitCodeFor(err) = %d, want exitInfra (%d)", exitCodeFor(err), exitInfra)
+	}
+	if !strings.Contains(err.Error(), "berth update --forensic") {
+		t.Errorf("error should hint at the build command, got: %v", err)
+	}
+}
+
+func TestRequireForensicImage_PresentImagePasses(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("docker images berth:forensic -q", "abc123\n")
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil", err)
+	}
+}
+
+func TestRequireForensicImage_NonForensicSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil for non-forensic spawn", err)
+	}
+	if cmds := fake.CommandsMatching("docker images berth:forensic"); len(cmds) != 0 {
+		t.Errorf("non-forensic spawn should not probe for the image, got %v", cmds)
+	}
+}
+
+func TestRequireForensicImage_DryRunSkipsCheck(t *testing.T) {
+	fake := vmexec.NewFake()
+	if err := requireForensicImage(context.Background(), fake, SpawnOpts{Forensic: true, DryRun: true}); err != nil {
+		t.Fatalf("requireForensicImage() error = %v, want nil for dry-run", err)
+	}
+	if cmds := fake.CommandsMatching("docker images berth:forensic"); len(cmds) != 0 {
+		t.Errorf("dry-run should not probe for the image, got %v", cmds)
 	}
 }
 

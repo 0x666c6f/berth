@@ -72,6 +72,7 @@ type SpawnOpts struct {
 	WorktreeInclude   string
 	DryRun            bool
 	Yes               bool
+	Forensic          bool
 	// Interactive marks a spawn launched from the `spawn`/`run` CLI commands
 	// (as opposed to fleet/pipeline/retry, which drive executeSpawn directly).
 	// Only interactive spawns get the risk confirmation prompt.
@@ -156,6 +157,7 @@ func init() {
 	f.StringVar(&spawnOpts.WorktreeInclude, "worktree-include", "", "File listing gitignored paths to copy into the worktree, e.g. .env (default: .berthinclude)")
 	f.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	f.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
+	f.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
 
 	rf := runCmd.Flags()
 	rf.StringVar(&spawnOpts.Name, "name", "", "Container name (default: auto-generated from agent type and repo)")
@@ -181,6 +183,7 @@ func init() {
 	rf.StringVar(&spawnOpts.WorktreePath, "worktree-path", "", "Host path for the --worktree checkout (must sit under the worktrees root)")
 	rf.BoolVar(&spawnOpts.DryRun, "dry-run", false, "Print the container commands that would run, then exit without launching")
 	rf.BoolVar(&spawnOpts.Yes, "yes", false, "Skip the host-side risk confirmation prompt (for scripts/automation)")
+	rf.BoolVar(&spawnOpts.Forensic, "forensic", false, "Use the forensic tool image (berth:forensic) and default the network to api-only; build it with 'berth update --forensic'")
 
 	rootCmd.AddCommand(spawnCmd, runCmd, notifyWaitCmd)
 }
@@ -267,6 +270,9 @@ func executeSpawn(opts SpawnOpts) error {
 	// this feature must refuse to launch rather than silently fall through to
 	// full internet (see requireAPIOnlyEnforcement).
 	if err := requireAPIOnlyEnforcement(ctx, exec, resolved, opts.DryRun); err != nil {
+		return err
+	}
+	if err := requireForensicImage(ctx, exec, opts); err != nil {
 		return err
 	}
 	if err := prepareSpawnResourceLimits(ctx, exec, opts, &resolved); err != nil {
@@ -490,6 +496,20 @@ func requireAPIOnlyEnforcement(ctx context.Context, exec vmexec.Executor, resolv
 	return nil
 }
 
+// requireForensicImage fails closed if --forensic is set but the berth:forensic
+// image hasn't been built in the VM, so a forensic spawn never silently falls
+// back to berth:latest.
+func requireForensicImage(ctx context.Context, exec vmexec.Executor, opts SpawnOpts) error {
+	if !opts.Forensic || opts.DryRun {
+		return nil
+	}
+	out, err := exec.Run(ctx, "docker", "images", "berth:forensic", "-q")
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return withExitCode(exitInfra, fmt.Errorf("forensic image berth:forensic not found. Build it with `berth update --forensic`, then retry"))
+	}
+	return nil
+}
+
 func validateResolvedSpawn(resolved spawnResolved) error {
 	if err := validate.MemoryLimit(resolved.Memory); err != nil {
 		return err
@@ -507,13 +527,17 @@ func validateResolvedSpawn(resolved spawnResolved) error {
 
 func prepareSpawnResolved(opts SpawnOpts, cfg config.Config) (spawnResolved, error) {
 	var err error
+	imageName := "berth:latest"
+	if opts.Forensic {
+		imageName = "berth:forensic"
+	}
 	resolved := spawnResolved{
 		Config:        cfg,
 		Memory:        coalesce(opts.Memory, cfg.Defaults.Memory),
 		CPUs:          coalesce(opts.CPUs, cfg.Defaults.CPUs),
 		PIDsLimit:     opts.PIDsLimit,
 		ContainerName: resolveContainerName(opts.AgentType, opts.Name, time.Now().Format("20060102-150405"), opts.Repos),
-		ImageName:     "berth:latest",
+		ImageName:     imageName,
 	}
 	if resolved.PIDsLimit == 0 && cfg.Defaults.PIDsLimit > 0 {
 		resolved.PIDsLimit = cfg.Defaults.PIDsLimit
@@ -567,6 +591,15 @@ func applySpawnConfigDefaults(opts SpawnOpts, cfg config.Config) SpawnOpts {
 		opts.SeedAuth = false
 	} else if cfg.Defaults.SeedAuth {
 		opts.SeedAuth = true
+	}
+	// berth is safe-by-default: a forensic spawn handles untrusted artifacts, so
+	// absent an explicit --network (flag or config default) it gets api-only
+	// egress rather than the normal full-internet bridge. This is the single
+	// chokepoint opts.Network is normalized at, before policy enforcement, host
+	// egress checks, and network creation all read it — so image selection, the
+	// risk summary, and the api-only preflight stay in agreement.
+	if opts.Forensic && opts.Network == "" && cfg.Defaults.Network == "" {
+		opts.Network = policy.NetworkAPIOnly
 	}
 	return opts
 }
