@@ -190,9 +190,10 @@ inject_security_preamble() {
 
   local network_status="${BERTH_NETWORK_MODE:-managed}"
   case "$network_status" in
-    managed) network_status="managed (dedicated bridge, internet access)" ;;
-    none)    network_status="none (no network access)" ;;
-    custom)  network_status="custom network" ;;
+    managed)  network_status="managed (dedicated bridge, internet access)" ;;
+    none)     network_status="none (no network access)" ;;
+    custom)   network_status="custom network" ;;
+    api-only) network_status="api-only (egress via allowlisted VM proxy; direct internet and DNS blocked)" ;;
   esac
 
   local docker_status="${BERTH_DOCKER_MODE:-off}"

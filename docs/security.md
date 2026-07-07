@@ -69,6 +69,24 @@ seed_auth = false
 - shared auth when reuse/seed flags are on
 - AWS access when `--aws` is on
 - host home isolation, unless the worktree mount is enabled (below)
+- direct internet egress, when `--network api-only` is on (below)
+
+### api-only egress mode
+
+`--network api-only` is the recommended mode for analyzing untrusted or suspicious file content. The container's direct internet egress is dropped by an iptables `REJECT` on its bridge (see [Architecture](architecture.md#api-only-egress-mode)), external DNS resolution doesn't work, and all HTTP(S) traffic must go through a VM-side `tinyproxy` instance reachable only via the injected `HTTPS_PROXY=http://berth-proxy:8119`. That proxy is default-deny and forwards only to an exact-host allowlist:
+
+- `api.anthropic.com`
+- `statsig.anthropic.com`
+- `sentry.io`
+- `github.com`
+- `codeload.github.com`
+- `objects.githubusercontent.com`
+
+**Blocks:** direct internet access, external DNS lookups, C2 callbacks, and bulk exfiltration — a malicious file in the workspace can't open a socket or resolve a hostname to anywhere but those six hosts.
+
+**Still leaks:** the model conversation itself. Claude Code's own traffic to `api.anthropic.com` is allowed (that's how the agent works at all), so a payload could in principle exfiltrate small amounts of data by getting the agent to echo it back through the conversation. That path is low-bandwidth and logged in session history, not covert — but it's not zero.
+
+**api-only is not a malware detonation sandbox.** It narrows network blast radius for static analysis; it does not sandbox execution. Treat all file content as untrusted data and never execute it. SSH clone doesn't work in this mode (port 22 is dropped) — use an HTTPS repo URL.
 
 ### The worktree mount trade-off
 
