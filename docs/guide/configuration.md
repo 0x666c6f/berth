@@ -39,6 +39,22 @@ BERTH_CONFIG_HOME=/tmp/berth-home berth list
 State files can be relocated separately with `BERTH_STATE_HOME`.
 When unset, state stays under the config home.
 
+### Migrating from safe-agentic
+
+berth is the renamed safe-agentic. The config home moved from `~/.safe-ag` to
+`~/.berth` (same layout, so a plain move migrates everything), env vars from
+`SAFE_AGENTIC_*` to `BERTH_*`, and the VM name from `safe-agentic` to `berth`:
+
+```bash
+brew uninstall safe-agentic && brew install 0x666c6f/tap/berth
+mv ~/.safe-ag ~/.berth        # merge instead if ~/.berth already exists
+berth setup                   # creates the new VM and image
+container machine stop safe-agentic && container machine rm safe-agentic
+```
+
+If `defaults.worktrees_dir` in `config.toml` points at a path under
+`~/.safe-ag`, update it after the move.
+
 ## Preferences file
 
 Path:

@@ -69,6 +69,17 @@ make build-all
 export PATH="$PWD/bin:$PATH"
 ```
 
+### Migrating from safe-agentic
+
+berth is the renamed safe-agentic; old GitHub URLs redirect. Binaries went from `safe-ag*` to `berth*`, env vars from `SAFE_AGENTIC_*` to `BERTH_*`, and the VM is now named `berth`. To switch an existing install:
+
+```bash
+brew uninstall safe-agentic && brew install 0x666c6f/tap/berth
+mv ~/.safe-ag ~/.berth        # keeps config, templates, and state (merge instead if ~/.berth exists)
+berth setup                   # creates the new VM and image
+container machine stop safe-agentic && container machine rm safe-agentic
+```
+
 ## First run
 
 ```bash
