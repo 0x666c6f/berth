@@ -45,6 +45,20 @@ func auditLog(run, action string, details map[string]string) {
 	}
 }
 
+// loadRunState reads a run's persisted state, translating "no such file"
+// into a clear create-first error so every gated verb reports the same
+// message for a run that was never created.
+func loadRunState(run string) (*detonate.Run, error) {
+	st, err := detonate.LoadRun(run)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("run %q does not exist — create it first", run)
+		}
+		return nil, fmt.Errorf("loading state for run %q: %w", run, err)
+	}
+	return st, nil
+}
+
 func sha256File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -141,6 +155,22 @@ func runCreate(ctx context.Context, r detonate.Runner, run, golden string) error
 	if err := validate.NameComponent(run, "run name"); err != nil {
 		return err
 	}
+	// Hold the run lock across the whole existence-check-then-create section:
+	// without it, two concurrent `create` calls could both pass the
+	// existence check before either persists state=Created.
+	unlock, err := detonate.LockRun(run)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Fail closed on reuse: a state file already existing means some earlier
+	// run by this name is still live (or at least undestroyed). destroy is
+	// the only way to clear it.
+	if _, err := detonate.LoadRun(run); err == nil {
+		return fmt.Errorf("run %q already exists; destroy it first", run)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking existing state for run %q: %w", run, err)
+	}
 	if golden == "" {
 		return fmt.Errorf("--golden is required")
 	}
@@ -156,6 +186,10 @@ func runCreate(ctx context.Context, r detonate.Runner, run, golden string) error
 	}
 	if err := r.Clone(ctx, golden, run); err != nil {
 		return fmt.Errorf("clone: %w", err)
+	}
+	now := time.Now()
+	if err := detonate.SaveRun(&detonate.Run{Name: run, Golden: golden, State: detonate.StateCreated, CreatedAt: now}); err != nil {
+		return fmt.Errorf("persisting state for run %q: %w", run, err)
 	}
 	auditLog(run, "detonate-create", map[string]string{"golden": golden})
 	fmt.Printf("created run %q from golden %q\n", run, golden)
@@ -179,6 +213,18 @@ func runInject(ctx context.Context, r detonate.Runner, run, samplePath string) e
 	if err := validate.NameComponent(run, "run name"); err != nil {
 		return err
 	}
+	unlock, err := detonate.LockRun(run)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	st, err := loadRunState(run)
+	if err != nil {
+		return err
+	}
+	if st.State != detonate.StateCreated {
+		return fmt.Errorf("run %q is not freshly created (state=%s) — inject requires state=Created", run, st.State)
+	}
 	hash, err := sha256File(samplePath)
 	if err != nil {
 		return fmt.Errorf("hashing sample: %w", err)
@@ -188,6 +234,10 @@ func runInject(ctx context.Context, r detonate.Runner, run, samplePath string) e
 	auditLog(run, "detonate-inject", map[string]string{"sha256": hash, "sample": samplePath})
 	if err := r.InjectOffline(ctx, run, samplePath); err != nil {
 		return fmt.Errorf("inject offline: %w", err)
+	}
+	st.State = detonate.StateInjected
+	if err := detonate.SaveRun(st); err != nil {
+		return fmt.Errorf("persisting state for run %q: %w", run, err)
 	}
 	fmt.Printf("injected %s (sha256 %s) into run %q\n", samplePath, hash, run)
 	return nil
@@ -228,6 +278,31 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 		return err
 	}
 
+	// Held for the entire gate-check-then-boot section (including the
+	// confirmation prompt and the boot itself): this is what stops two
+	// concurrent `run` invocations from both loading state=Injected and
+	// both reaching Runner.Run before either persists Detonated.
+	unlock, err := detonate.LockRun(run)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// This is the no-reuse enforcement: a run can only be booted once, from
+	// state=Injected. Already-detonated (or collected) state means a prior
+	// clone was already exposed to the live sample — never re-run it, even
+	// if it was never destroyed.
+	st, err := loadRunState(run)
+	if err != nil {
+		return err
+	}
+	if st.State == detonate.StateCreated {
+		return fmt.Errorf("run %q has not been injected yet (state=Created) — inject a sample before run", run)
+	}
+	if st.State != detonate.StateInjected {
+		return fmt.Errorf("run %q already detonated (state=%s): destroy and re-create for a fresh run — clones are never reused", run, st.State)
+	}
+
 	net, err := r.ConfigureIsolatedNet(ctx, run, gateway)
 	if err != nil {
 		return fmt.Errorf("configure isolated net: %w", err)
@@ -241,6 +316,19 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 		return err
 	}
 
+	// Mark the clone consumed BEFORE booting, not after. If this were saved
+	// only on success, a boot that errors AND then fails to auto-destroy
+	// would leave state at Injected — which still permits `run` — even
+	// though the clone has already been exposed to the live sample once.
+	// Saving Detonated up front means every later outcome (success, or
+	// failure with auto-destroy failing too) leaves the run correctly
+	// blocked from reuse; only a confirmed destroy clears it.
+	st.State = detonate.StateDetonated
+	st.Gateway = gateway
+	if err := detonate.SaveRun(st); err != nil {
+		return fmt.Errorf("persisting state for run %q: %w — aborting before boot", run, err)
+	}
+
 	details := map[string]string{"gateway": gateway, "timeout": timeout.String()}
 	runErr := r.Run(ctx, run, timeout)
 	if runErr != nil {
@@ -251,10 +339,17 @@ func runRun(ctx context.Context, r detonate.Runner, run, gateway string, timeout
 		if dErr := r.Destroy(ctx, run); dErr != nil {
 			details["destroy_error"] = dErr.Error()
 			auditLog(run, "detonate-run", details)
+			// State stays Detonated (already saved above): the clone may
+			// still be running, so this run name stays blocked from reuse
+			// until an explicit destroy (always allowed) clears it.
 			return fmt.Errorf("detonation failed AND auto-destroy FAILED — VM %q may still be running; destroy it manually with 'detonate destroy %s': runErr=%w destroyErr=%w", run, run, runErr, dErr)
 		}
 		details["auto_destroyed"] = "true"
 		auditLog(run, "detonate-run", details)
+		// The clone is gone (auto-destroy succeeded), so clear its state too —
+		// best-effort, same as the destroy verb — freeing the run name for a
+		// fresh create.
+		_ = detonate.DeleteRun(run)
 		return fmt.Errorf("detonation failed (auto-destroyed): %w", runErr)
 	}
 	details["status"] = "completed"
@@ -312,6 +407,18 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 	if outDir == "" {
 		return fmt.Errorf("--out is required")
 	}
+	unlock, err := detonate.LockRun(run)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	st, err := loadRunState(run)
+	if err != nil {
+		return err
+	}
+	if st.State != detonate.StateDetonated {
+		return fmt.Errorf("run %q is not in Detonated state (state=%s) — collect requires a completed run", run, st.State)
+	}
 	off, err := r.PoweredOff(ctx, run)
 	if err != nil {
 		return fmt.Errorf("checking power state: %w", err)
@@ -348,6 +455,16 @@ func runCollect(ctx context.Context, r detonate.Runner, run, outDir string) erro
 		"count":     strconv.Itoa(len(files)),
 		"artifacts": strings.Join(lines, "\n"),
 	})
+	if collectErr == nil {
+		// Advance even if some artifacts failed to hash (hashErr): the copy
+		// off the VM fully succeeded, so the run itself is Collected. A
+		// mid-loop collectErr, by contrast, leaves state at Detonated so
+		// collect can be retried.
+		st.State = detonate.StateCollected
+		if err := detonate.SaveRun(st); err != nil {
+			return fmt.Errorf("persisting state for run %q: %w", run, err)
+		}
+	}
 	if collectErr != nil {
 		return fmt.Errorf("collect: %w", collectErr)
 	}
@@ -377,6 +494,13 @@ func runDestroy(ctx context.Context, r detonate.Runner, run string) error {
 		details["error"] = err.Error()
 	}
 	auditLog(run, "detonate-destroy", details)
+	// Always allowed, always clears state: destroy is the sole way to free a
+	// run name for reuse, regardless of whether the runner destroy above
+	// succeeded (best-effort, matching Destroy's always-reachable contract
+	// in pkg/detonate.State.CanTransition).
+	if delErr := detonate.DeleteRun(run); delErr != nil {
+		fmt.Fprintf(os.Stderr, "detonate: warning: clearing state for run %q failed: %v\n", run, delErr)
+	}
 	if err != nil {
 		return fmt.Errorf("destroy: %w", err)
 	}

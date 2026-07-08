@@ -81,6 +81,23 @@ const (
 	StateDestroyed
 )
 
+func (s State) String() string {
+	switch s {
+	case StateCreated:
+		return "Created"
+	case StateInjected:
+		return "Injected"
+	case StateDetonated:
+		return "Detonated"
+	case StateCollected:
+		return "Collected"
+	case StateDestroyed:
+		return "Destroyed"
+	default:
+		return "unknown"
+	}
+}
+
 // CanTransition reports whether moving from s to "to" is a legal step.
 func (s State) CanTransition(to State) bool {
 	if s == StateDestroyed {

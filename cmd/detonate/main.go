@@ -22,10 +22,14 @@ berth's forensic workflow. Safety model (non-negotiable, enforced in code):
     and Run is never invoked.
   - No restore/reuse verb. Each run clones a fresh VM from an immutable
     golden and is meant to be destroyed after collection, or automatically
-    on failure. There is no restore or revert verb — but nothing currently
-    blocks re-invoking run on an un-destroyed clone, so the operator MUST
-    always destroy a run after collect (or on any failure) rather than
-    relying on the tool to enforce it.
+    on failure. There is no restore or revert verb, and reuse is enforced
+    in code: a run's lifecycle state (Created/Injected/Detonated/Collected)
+    is persisted per-run to ~/.berth/detonate/<run>.json, and every verb is
+    gated on it. run refuses outright on a run that is already
+    Detonated/Collected ("destroy and re-create for a fresh run — clones
+    are never reused"). destroy is the sole escape hatch: always allowed,
+    from any state, and it clears the state file so the run name can be
+    created fresh again.
   - Offline inject. Samples are attached to the guest disk offline, before
     boot — never copied in over a live network path.
   - Benign-in-sandbox is not safe. A sample that behaves benignly inside the

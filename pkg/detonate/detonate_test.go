@@ -125,6 +125,26 @@ func TestRoute(t *testing.T) {
 	}
 }
 
+func TestStateString(t *testing.T) {
+	cases := map[State]string{
+		StateCreated:   "Created",
+		StateInjected:  "Injected",
+		StateDetonated: "Detonated",
+		StateCollected: "Collected",
+		StateDestroyed: "Destroyed",
+	}
+	seen := map[string]bool{}
+	for state, want := range cases {
+		if got := state.String(); got != want {
+			t.Errorf("State(%d).String() = %q, want %q", state, got, want)
+		}
+		seen[want] = true
+	}
+	if len(seen) != len(cases) {
+		t.Errorf("State.String() values not unique: %v", seen)
+	}
+}
+
 // TestCanTransition exhaustively checks every (from, to) pair across all five
 // states: forward single-step is allowed, backward/skip/same-state is
 // rejected, Destroy is allowed from any non-terminal state, and Destroyed
