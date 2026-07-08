@@ -2,6 +2,7 @@ package detonate
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -66,6 +67,135 @@ func TestSaveRun_PreservesCreatedAtAcrossUpdates(t *testing.T) {
 	}
 	if !got.CreatedAt.Equal(created) {
 		t.Errorf("CreatedAt = %v, want unchanged %v", got.CreatedAt, created)
+	}
+}
+
+func TestNewNonce_UniqueNonEmpty(t *testing.T) {
+	a, b := NewNonce(), NewNonce()
+	if a == "" || b == "" {
+		t.Fatalf("NewNonce() returned empty: %q %q", a, b)
+	}
+	if a == b {
+		t.Errorf("NewNonce() not unique across calls: %q == %q", a, b)
+	}
+}
+
+// TestSaveRunIfNonce_AbortsWhenRecreated is the Fix-2 guard on the save path:
+// after a caller loads a run (capturing its nonce), an out-of-band
+// destroy+recreate mints a new nonce; the stale caller's SaveRunIfNonce must
+// refuse rather than overwrite the brand-new run's state.
+func TestSaveRunIfNonce_AbortsWhenRecreated(t *testing.T) {
+	t.Setenv("DETONATE_STATE_DIR", t.TempDir())
+	if err := SaveRun(&Run{Name: "run-1", State: StateCreated, Nonce: "nonce-A"}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	loaded, err := LoadRun("run-1") // stale caller captures nonce-A
+	if err != nil {
+		t.Fatalf("LoadRun() error = %v", err)
+	}
+
+	// Out-of-band: destroy and recreate the same name with a fresh nonce.
+	if err := DeleteRun("run-1"); err != nil {
+		t.Fatalf("DeleteRun() error = %v", err)
+	}
+	if err := SaveRun(&Run{Name: "run-1", State: StateCreated, Nonce: "nonce-B"}); err != nil {
+		t.Fatalf("recreate SaveRun() error = %v", err)
+	}
+
+	loaded.State = StateInjected // the stale caller tries to advance state
+	err = SaveRunIfNonce(loaded, loaded.Nonce)
+	if err == nil {
+		t.Fatal("SaveRunIfNonce() error = nil, want a nonce-mismatch abort")
+	}
+	if !strings.Contains(err.Error(), "nonce mismatch") {
+		t.Errorf("SaveRunIfNonce() error = %v, want it to name the nonce mismatch", err)
+	}
+
+	// The recreated run must be untouched.
+	got, err := LoadRun("run-1")
+	if err != nil {
+		t.Fatalf("LoadRun() after aborted save error = %v", err)
+	}
+	if got.Nonce != "nonce-B" || got.State != StateCreated {
+		t.Errorf("recreated run was overwritten: state=%s nonce=%q, want Created/nonce-B", got.State, got.Nonce)
+	}
+}
+
+// TestSaveRunIfNonce_AbortsWhenDestroyed covers the recreate's earlier half:
+// if the run was destroyed and NOT yet recreated, a stale save must not
+// resurrect a dead run's state.
+func TestSaveRunIfNonce_AbortsWhenDestroyed(t *testing.T) {
+	t.Setenv("DETONATE_STATE_DIR", t.TempDir())
+	if err := SaveRun(&Run{Name: "run-1", State: StateCreated, Nonce: "nonce-A"}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	loaded, err := LoadRun("run-1")
+	if err != nil {
+		t.Fatalf("LoadRun() error = %v", err)
+	}
+	if err := DeleteRun("run-1"); err != nil {
+		t.Fatalf("DeleteRun() error = %v", err)
+	}
+	loaded.State = StateInjected
+	if err := SaveRunIfNonce(loaded, loaded.Nonce); err == nil {
+		t.Fatal("SaveRunIfNonce() error = nil, want abort on a destroyed run")
+	}
+	if _, err := LoadRun("run-1"); !os.IsNotExist(err) {
+		t.Errorf("LoadRun() after aborted save = %v, want os.IsNotExist (state not resurrected)", err)
+	}
+}
+
+// TestDeleteRunIfNonce_AbortsWhenRecreated is the Fix-2 guard on the delete
+// path: a stale invocation (nonce-A) must not wipe the state of a run that was
+// destroyed and recreated (nonce-B) since it loaded.
+func TestDeleteRunIfNonce_AbortsWhenRecreated(t *testing.T) {
+	t.Setenv("DETONATE_STATE_DIR", t.TempDir())
+	if err := SaveRun(&Run{Name: "run-1", State: StateDetonated, Nonce: "nonce-A"}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	staleNonce := "nonce-A" // captured at the start of the stale invocation
+
+	if err := DeleteRun("run-1"); err != nil {
+		t.Fatalf("DeleteRun() error = %v", err)
+	}
+	if err := SaveRun(&Run{Name: "run-1", State: StateCreated, Nonce: "nonce-B"}); err != nil {
+		t.Fatalf("recreate SaveRun() error = %v", err)
+	}
+
+	err := DeleteRunIfNonce("run-1", staleNonce)
+	if err == nil {
+		t.Fatal("DeleteRunIfNonce() error = nil, want a nonce-mismatch abort")
+	}
+	if !strings.Contains(err.Error(), "nonce mismatch") {
+		t.Errorf("DeleteRunIfNonce() error = %v, want it to name the nonce mismatch", err)
+	}
+
+	got, err := LoadRun("run-1")
+	if err != nil {
+		t.Fatalf("recreated run's state was wiped: %v", err)
+	}
+	if got.Nonce != "nonce-B" {
+		t.Errorf("wrong run left on disk: nonce=%q, want nonce-B", got.Nonce)
+	}
+}
+
+// TestDeleteRunIfNonce_MatchDeletes confirms the guard doesn't over-block: a
+// matching nonce (or a legacy/ghost run with an empty nonce) still clears.
+func TestDeleteRunIfNonce_MatchDeletes(t *testing.T) {
+	t.Setenv("DETONATE_STATE_DIR", t.TempDir())
+	if err := SaveRun(&Run{Name: "run-1", State: StateCreated, Nonce: "nonce-A"}); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	if err := DeleteRunIfNonce("run-1", "nonce-A"); err != nil {
+		t.Fatalf("DeleteRunIfNonce() error = %v, want nil on a matching nonce", err)
+	}
+	if _, err := LoadRun("run-1"); !os.IsNotExist(err) {
+		t.Errorf("LoadRun() after matching delete = %v, want os.IsNotExist", err)
+	}
+
+	// A run that's already gone is a no-op success (nothing to protect).
+	if err := DeleteRunIfNonce("ghost", ""); err != nil {
+		t.Errorf("DeleteRunIfNonce() on a ghost run = %v, want nil", err)
 	}
 }
 

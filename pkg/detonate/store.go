@@ -1,6 +1,8 @@
 package detonate
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,13 +28,33 @@ func StateDir() string {
 // comment; with it, CanTransition can actually be enforced across
 // invocations.
 type Run struct {
-	Name      string    `json:"name"`
-	Golden    string    `json:"golden"`
-	Gateway   string    `json:"gateway,omitempty"`
-	State     State     `json:"state"`
-	CloneID   string    `json:"clone_id,omitempty"`
+	Name    string `json:"name"`
+	Golden  string `json:"golden"`
+	Gateway string `json:"gateway,omitempty"`
+	State   State  `json:"state"`
+	CloneID string `json:"clone_id,omitempty"`
+	// Nonce is a random token minted once at create. It lets a verb that
+	// captured the nonce at load time detect that the run it started acting on
+	// was destroyed and recreated out from under it (a lockless `destroy`
+	// followed by a fresh `create` reuses the name but mints a new nonce). The
+	// *If Nonce store ops refuse to overwrite or delete state whose on-disk
+	// nonce no longer matches — so a stale invocation can never corrupt the
+	// brand-new run that took its place.
+	Nonce     string    `json:"nonce,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NewNonce mints a random per-run token (see Run.Nonce). crypto/rand failing
+// is near-impossible on the supported platforms; if it ever does, fall back to
+// a high-resolution timestamp so create still yields a distinct-per-run value
+// rather than a shared empty string that would defeat the guard.
+func NewNonce() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("t%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func runStatePath(name string) string {
@@ -119,4 +141,45 @@ func DeleteRun(name string) error {
 		return fmt.Errorf("deleting lock for run %q: %w", name, err)
 	}
 	return nil
+}
+
+// SaveRunIfNonce persists r only if the on-disk state still carries the nonce
+// the caller loaded (expectedNonce). It re-reads state right before writing:
+// if the run was destroyed (state gone) or destroyed-and-recreated (nonce
+// changed) since the caller loaded it, the save is refused rather than
+// resurrecting a dead run or clobbering the brand-new one that reused the name.
+func SaveRunIfNonce(r *Run, expectedNonce string) error {
+	cur, err := LoadRun(r.Name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("run %q was destroyed concurrently (nonce %q gone); not recreating its state", r.Name, expectedNonce)
+		}
+		return fmt.Errorf("re-reading state for run %q before save: %w", r.Name, err)
+	}
+	if cur.Nonce != expectedNonce {
+		return fmt.Errorf("run %q was recreated concurrently (nonce mismatch: loaded %q, on-disk %q); not touching the new run", r.Name, expectedNonce, cur.Nonce)
+	}
+	return SaveRun(r)
+}
+
+// DeleteRunIfNonce clears a run's state only if the on-disk nonce still matches
+// expectedNonce. A stale invocation (e.g. a `run` whose boot finally errored
+// long after an operator destroyed and recreated the run) must not delete the
+// new run's state. If the run is already gone it's a no-op success — there is
+// nothing left to protect — but any leftover lock file is still cleared.
+func DeleteRunIfNonce(name, expectedNonce string) error {
+	cur, err := LoadRun(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if lerr := os.Remove(lockPath(name)); lerr != nil && !os.IsNotExist(lerr) {
+				return fmt.Errorf("clearing lock for run %q: %w", name, lerr)
+			}
+			return nil
+		}
+		return fmt.Errorf("re-reading state for run %q before delete: %w", name, err)
+	}
+	if cur.Nonce != expectedNonce {
+		return fmt.Errorf("run %q was recreated concurrently (nonce mismatch: loaded %q, on-disk %q); not deleting the new run's state", name, expectedNonce, cur.Nonce)
+	}
+	return DeleteRun(name)
 }

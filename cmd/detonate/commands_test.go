@@ -688,6 +688,77 @@ func TestRunRun_RefusesReuseOfAlreadyDetonatedRun(t *testing.T) {
 	}
 }
 
+// TestRunRun_RefusesReuseOfCollectedRun exercises the CanTransition gate on a
+// state the old `!= StateInjected` check also covered, but here the point is
+// the policy is now the tested State.CanTransition, not an ad-hoc compare: a
+// Collected run cannot transition to Detonated, so `run` must refuse it.
+func TestRunRun_RefusesReuseOfCollectedRun(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+	seedDetonated(t, fake, "run-1")
+	fake.SetPoweredOff("run-1", true)
+	if err := runCollect(context.Background(), fake, "run-1", t.TempDir()); err != nil {
+		t.Fatalf("seed collect: %v", err)
+	}
+
+	before := len(fake.Log)
+	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("runRun() error = nil, want refusal for a run already in Collected state")
+	}
+	if !strings.Contains(err.Error(), "already detonated") {
+		t.Errorf("runRun() error = %v, want the no-reuse refusal (CanTransition path)", err)
+	}
+	if len(fake.Log) != before {
+		t.Errorf("Runner was touched on the CanTransition-blocked path: new calls %+v", fake.Log[before:])
+	}
+}
+
+// TestRunRun_SkipsCleanupWhenRecreatedDuringRun is the Fix-2 integration test:
+// while r.Run is blocked, an out-of-band destroy+recreate replaces run-1 with a
+// brand-new run (new nonce). When r.Run then errors, runRun must NOT auto-
+// destroy or wipe the new run — the nonce guard aborts the cleanup.
+func TestRunRun_SkipsCleanupWhenRecreatedDuringRun(t *testing.T) {
+	setTempAuditPath(t)
+	fake := detonate.NewFakeRunner()
+	seedInjected(t, fake, "run-1")
+	t.Setenv("DETONATE_I_UNDERSTAND", "1")
+
+	fake.SetRunErr("run-1", fmt.Errorf("boom"))
+	// Simulate the operator racing us mid-detonation: destroy this run and
+	// create a fresh one under the same name with a different nonce.
+	fake.SetRunHook("run-1", func() {
+		if err := detonate.DeleteRun("run-1"); err != nil {
+			t.Errorf("out-of-band DeleteRun: %v", err)
+		}
+		recreated := &detonate.Run{Name: "run-1", Golden: "golden-seed", State: detonate.StateCreated, Nonce: "nonce-C", CreatedAt: time.Now()}
+		if err := detonate.SaveRun(recreated); err != nil {
+			t.Errorf("out-of-band recreate: %v", err)
+		}
+	})
+
+	err := runRun(context.Background(), fake, "run-1", "gw0", time.Second, true, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("runRun() error = nil, want the run error surfaced")
+	}
+	if !strings.Contains(err.Error(), "recreated concurrently") {
+		t.Errorf("runRun() error = %v, want it to report the concurrent recreate", err)
+	}
+
+	// The brand-new run must be untouched: still Created, still nonce-C.
+	st, err := detonate.LoadRun("run-1")
+	if err != nil {
+		t.Fatalf("recreated run's state was wiped: %v", err)
+	}
+	if st.State != detonate.StateCreated || st.Nonce != "nonce-C" {
+		t.Errorf("recreated run corrupted: state=%s nonce=%q, want Created/nonce-C", st.State, st.Nonce)
+	}
+	// And we must NOT have destroyed the new run's clone.
+	if hasCall(fake.Log, "Destroy") {
+		t.Error("auto-destroy ran against the recreated run's clone — nonce guard failed")
+	}
+}
+
 // ─── collect ────────────────────────────────────────────────────────────
 
 func TestRunCollect_FailsClosedWhenNotPoweredOff(t *testing.T) {

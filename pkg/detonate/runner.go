@@ -47,6 +47,7 @@ type FakeRunner struct {
 	netErr        map[string]error
 	injectErr     map[string]error
 	runErr        map[string]error
+	runHook       map[string]func()
 	collectFiles  map[string][]string
 	collectErr    map[string]error
 	poweredOff    map[string]bool
@@ -63,6 +64,7 @@ func NewFakeRunner() *FakeRunner {
 		netErr:        make(map[string]error),
 		injectErr:     make(map[string]error),
 		runErr:        make(map[string]error),
+		runHook:       make(map[string]func()),
 		collectFiles:  make(map[string][]string),
 		collectErr:    make(map[string]error),
 		poweredOff:    make(map[string]bool),
@@ -127,6 +129,15 @@ func (f *FakeRunner) SetRunErr(run string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.runErr[run] = err
+}
+
+// SetRunHook registers a callback fired inside Run (after it's recorded, before
+// it returns) — the point a real detonation would be blocking. Tests use it to
+// simulate an out-of-band destroy+recreate racing the in-flight run.
+func (f *FakeRunner) SetRunHook(run string, hook func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runHook[run] = hook
 }
 
 func (f *FakeRunner) SetCollectFiles(run string, files []string) {
@@ -209,8 +220,13 @@ func (f *FakeRunner) InjectOffline(_ context.Context, run, samplePath string) er
 func (f *FakeRunner) Run(_ context.Context, run string, timeout time.Duration) error {
 	f.record("Run", run, timeout.String())
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.runErr[run]
+	hook := f.runHook[run]
+	err := f.runErr[run]
+	f.mu.Unlock()
+	if hook != nil {
+		hook() // fired outside the lock: mirrors a real, blocking detonation
+	}
+	return err
 }
 
 func (f *FakeRunner) Collect(_ context.Context, run, destDir string) ([]string, error) {
