@@ -3699,6 +3699,15 @@ func TestDiagnoseCommand_SummaryReflectsFailedChecks(t *testing.T) {
 	fake, cleanup := testSetup(t)
 	defer cleanup()
 
+	// CI runners have no Apple `container` binary, and runDiagnose bails out
+	// before the summary when it is missing — stub one on PATH so the test
+	// exercises the same path everywhere.
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "container"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write container stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	fake.SetResponse("docker info", "Server Version: 24.0\n")
 	fake.SetResponse("docker images berth:latest -q", "sha256:abc123\n")
 	// api-only gap: FakeExecutor returns "" for iptables -S DOCKER-USER, so the
