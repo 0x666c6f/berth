@@ -3729,7 +3729,7 @@ func TestDiagnoseCommand_SummaryReflectsFailedChecks(t *testing.T) {
 	// With the gap closed, the summary should say all passed again.
 	fake.SetResponse("iptables -S DOCKER-USER", "-A DOCKER-USER -j BERTH_EGRESS\n")
 	fake.SetResponse("iptables -S BERTH_EGRESS", "-A BERTH_EGRESS -i bti+ -j REJECT\n")
-	fake.SetResponse("pgrep -f /usr/bin/[t]inyproxy", "123\n")
+	fake.SetResponse("pgrep -f (^|/)[t]inyproxy", "123\n")
 
 	output = captureOutput(func() {
 		if err := runDiagnose(diagnoseCmd, nil); err != nil {
