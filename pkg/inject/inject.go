@@ -48,15 +48,13 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	return envs, nil
 }
 
-// sanitizeClaudeSettings strips host-only keys from a seeded settings.json.
-// Plugin enablement: inside the container Claude Code would clone every
+// sanitizeClaudeSettings strips host plugin enablement from a seeded
+// settings.json. Inside the container Claude Code would otherwise clone every
 // enabled marketplace into ~/.claude/plugins on first start — filling the
 // small .claude tmpfs (which then silently breaks session-transcript writes,
 // i.e. `berth logs`/`berth output`) with repos that are host preferences, not
-// sandbox ones. Hooks: ~/.claude is a noexec tmpfs in the container, so
-// seeded hook scripts can never execute — every matching tool call would log
-// "Permission denied" noise. Hooks that should run inside the sandbox belong
-// in the repo's own .claude/settings.json, which berth doesn't touch.
+// sandbox ones. Hooks are kept: the hook scripts are seeded into
+// ~/.claude/hooks and the auth tmpfs allows exec so they can run.
 // Unparseable settings are passed through untouched.
 func sanitizeClaudeSettings(data []byte) []byte {
 	var settings map[string]json.RawMessage
@@ -64,7 +62,7 @@ func sanitizeClaudeSettings(data []byte) []byte {
 		return data
 	}
 	changed := false
-	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces", "hooks"} {
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
 		if _, ok := settings[key]; ok {
 			delete(settings, key)
 			changed = true
@@ -195,12 +193,10 @@ func extractClaudeAccessToken(secret string) string {
 	}
 }
 
-// ReadClaudeSupportFiles tars CLAUDE.md, commands/, statusline-command.sh
+// ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
 // from configDir and returns them as BERTH_CLAUDE_SUPPORT_B64.
-// The entrypoint extracts this into ~/.claude/ inside the container.
-// hooks/ is deliberately NOT seeded: ~/.claude is a noexec tmpfs in the
-// container, so hook scripts could never execute there (the hooks key is
-// stripped from the seeded settings.json for the same reason).
+// The entrypoint extracts this into ~/.claude/ inside the container. The
+// ephemeral auth tmpfs allows exec so seeded hook scripts can actually run.
 func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 	envs := make(map[string]string)
 
@@ -216,7 +212,7 @@ func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 			entries = append(entries, entry{name, false})
 		}
 	}
-	for _, name := range []string{"commands"} {
+	for _, name := range []string{"hooks", "commands"} {
 		p := filepath.Join(configDir, name)
 		if info, err := os.Lstat(p); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			entries = append(entries, entry{name, true})
