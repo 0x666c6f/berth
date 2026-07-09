@@ -444,7 +444,7 @@ func TestAppendAuthVolumes_DefaultEphemeralUsesTmpfs(t *testing.T) {
 	}
 
 	joined := strings.Join(cmd.Build(), " ")
-	if !strings.Contains(joined, "--tmpfs /home/agent/.claude:rw,noexec,nosuid,size=64m,uid=1000,gid=1000") {
+	if !strings.Contains(joined, "--tmpfs /home/agent/.claude:rw,exec,nosuid,size=64m,uid=1000,gid=1000") {
 		t.Fatalf("expected ephemeral auth tmpfs in docker command, got:\n%s", joined)
 	}
 	if strings.Contains(joined, "src=agent-claude-test-auth,dst=/home/agent/.claude") {
@@ -465,8 +465,8 @@ func TestAppendAuthVolumes_ShellEphemeralMountsClaudeAndCodex(t *testing.T) {
 
 	joined := strings.Join(cmd.Build(), " ")
 	for _, want := range []string{
-		"--tmpfs /home/agent/.claude:rw,noexec,nosuid,size=64m,uid=1000,gid=1000",
-		"--tmpfs /home/agent/.codex:rw,noexec,nosuid,size=64m,uid=1000,gid=1000",
+		"--tmpfs /home/agent/.claude:rw,exec,nosuid,size=64m,uid=1000,gid=1000",
+		"--tmpfs /home/agent/.codex:rw,exec,nosuid,size=64m,uid=1000,gid=1000",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected shell auth mount %q in docker command:\n%s", want, joined)

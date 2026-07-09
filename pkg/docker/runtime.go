@@ -100,6 +100,10 @@ func (d *DockerRunCmd) addTmpfs(path, size string, noexec, nosuid bool, uid, gid
 	opts := "rw"
 	if noexec {
 		opts += ",noexec"
+	} else {
+		// Docker's tmpfs default is noexec — merely omitting the flag keeps
+		// it; exec must be requested explicitly.
+		opts += ",exec"
 	}
 	if nosuid {
 		opts += ",nosuid"

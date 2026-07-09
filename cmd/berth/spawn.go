@@ -827,7 +827,13 @@ func appendAuthVolumes(ctx context.Context, exec vmexec.Executor, cmd *docker.Do
 		// full tmpfs makes those writes fail silently — Claude keeps running
 		// but `berth logs`/`berth output` see a 0-byte session file. tmpfs
 		// pages are allocated lazily, so the headroom costs nothing up front.
-		cmd.AddTmpfsOwned(dst, "64m", true, true, 1000, 1000)
+		//
+		// exec allowed (noexec=false): seeded hook scripts live in
+		// ~/.claude/hooks and must run. This matches the --reuse-auth path,
+		// where the named auth volume is exec-able anyway; the agent can
+		// already execute anything in /workspace, so noexec here added no
+		// real boundary. nosuid stays on.
+		cmd.AddTmpfsOwned(dst, "64m", false, true, 1000, 1000)
 	}
 	return nil
 }

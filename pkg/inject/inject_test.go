@@ -99,13 +99,15 @@ func TestReadClaudeConfigStripsPluginEnablement(t *testing.T) {
 	if err := json.Unmarshal(decoded, &got); err != nil {
 		t.Fatalf("seeded settings not valid JSON: %v", err)
 	}
-	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces", "hooks"} {
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
 		if _, ok := got[key]; ok {
 			t.Errorf("seeded settings still contain %q", key)
 		}
 	}
-	if _, ok := got["model"]; !ok {
-		t.Errorf("seeded settings lost %q", "model")
+	for _, key := range []string{"model", "hooks"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("seeded settings lost %q", key)
+		}
 	}
 }
 
@@ -490,7 +492,6 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(dir, "commands", "pipe"), 0o600); err != nil {
 		t.Fatalf("create fifo: %v", err)
 	}
-	// hooks/ must NOT be seeded (noexec tmpfs in the container).
 	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
 		t.Fatalf("mkdir hooks: %v", err)
 	}
@@ -542,8 +543,8 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	if contains(names, "commands/pipe") {
 		t.Fatalf("did not expect fifo in archive, got %v", names)
 	}
-	if contains(names, "hooks/pre-commit.sh") {
-		t.Fatalf("hooks must not be seeded (noexec tmpfs), got %v", names)
+	if !contains(names, "hooks/pre-commit.sh") {
+		t.Fatalf("expected hook file in archive, got %v", names)
 	}
 }
 
