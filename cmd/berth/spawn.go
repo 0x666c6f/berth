@@ -662,16 +662,34 @@ func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts 
 	if resolved.Memory == "" && resolved.CPUs == "" {
 		return nil
 	}
-	if !dockerCgroupIsThreaded(ctx, exec) {
+	if !dockerCgroupIsThreaded(ctx, exec) && vmDelegatesMemoryController(ctx, exec) {
 		return nil
 	}
 	if opts.Memory != "" || opts.CPUs != "" {
-		return fmt.Errorf("VM Docker cgroup is threaded; Docker rejects explicit --memory/--cpus limits on this VM")
+		return fmt.Errorf("the VM kernel does not delegate the memory cgroup controller (Apple container machine limitation), so Docker rejects explicit --memory/--cpus limits; --pids-limit still applies")
 	}
-	fmt.Fprintln(os.Stderr, "warning: VM Docker cgroup is threaded; omitting default --memory/--cpus limits because Docker rejects them here")
+	fmt.Fprintln(os.Stderr, "warning: VM does not delegate the memory cgroup controller (Apple container machine limitation); omitting default --memory/--cpus limits (--pids-limit still applies)")
 	resolved.Memory = ""
 	resolved.CPUs = ""
 	return nil
+}
+
+// vmDelegatesMemoryController reports whether the memory controller can reach
+// Docker's container cgroups. On Apple container machines vminitd owns the
+// real hierarchy: +memory/+io delegation from the namespace root returns
+// EOPNOTSUPP, so "memory" never appears in the root subtree_control and
+// --memory/--cpus can never apply. Checking subtree_control is stable, unlike
+// cgroup.type, which flips between "domain" and "domain threaded" as Docker's
+// threaded cgroup comes and goes.
+func vmDelegatesMemoryController(ctx context.Context, exec vmexec.Executor) bool {
+	out, err := exec.Run(ctx, "cat", "/sys/fs/cgroup/cgroup.subtree_control")
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		// Can't tell (or nothing enabled controllers yet, e.g. a pristine VM
+		// where Docker hasn't run a container) — keep the limits and let
+		// Docker report its own error if it must.
+		return true
+	}
+	return strings.Contains(string(out), "memory")
 }
 
 // prepareSpawnEvidence ingests --evidence (validate, audit, populate a labeled

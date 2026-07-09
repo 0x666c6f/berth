@@ -72,12 +72,31 @@ wait_for_docker_process_exit() {
 }
 
 start_dockerd_once() {
+  # Supervise dockerd under busybox init (::respawn: in /etc/inittab) instead
+  # of nohup-ing it from this session: machine-run exec sessions live inside a
+  # cgroup namespace rooted at a threaded/populated cgroup, so a dockerd
+  # started here can never delegate domain controllers (memory/io) to
+  # container cgroups and Docker rejects --memory/--cpus ("cannot enter
+  # cgroupv2 ... invalid state"). init's children run under the real root
+  # cgroup where delegation works. Bonus: dockerd survives VM reboots and
+  # crashes without re-running setup.
+  as_root mkdir -p /var/log
+  as_root tee /usr/local/bin/berth-dockerd-run >/dev/null <<'DKRUN'
+#!/bin/sh
+# Respawned by init (see /etc/inittab). The sleep throttles a crash loop:
+# busybox init has no respawn backoff of its own.
+dockerd --host=unix:///var/run/docker.sock >> /var/log/dockerd.log 2>&1
+sleep 5
+DKRUN
+  as_root chmod 0755 /usr/local/bin/berth-dockerd-run
+  if ! as_root grep -q 'berth-dockerd-run' /etc/inittab 2>/dev/null; then
+    echo '::respawn:/usr/local/bin/berth-dockerd-run' | as_root tee -a /etc/inittab >/dev/null
+  fi
   as_root pkill dockerd >/dev/null 2>&1 || true
   as_root pkill containerd >/dev/null 2>&1 || true
   wait_for_docker_process_exit
   as_root rm -f /var/run/docker.pid /var/run/docker.sock
-  as_root mkdir -p /var/log
-  as_root sh -c 'nohup dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &'
+  as_root kill -HUP 1
 }
 
 echo "==> Setting up berth VM..."
@@ -243,6 +262,16 @@ install_exec_helper
 # Configure Docker
 # =============================================================================
 step 4 "Configuring Docker daemon..."
+
+# NOTE on resource limits: --memory/--cpus cannot work on Apple container
+# machines today. The guest's /sys/fs/cgroup is a namespaced view of a cgroup
+# that vminitd owns from outside: process migration out of the namespace root
+# and delegation of domain controllers (+memory/+io) both return EOPNOTSUPP,
+# so the systemd/openrc "move everything to a leaf, then delegate" dance is
+# impossible and runc fails with "cannot enter cgroupv2 /sys/fs/cgroup/docker
+# with domain controllers". Only threaded-capable controllers (cpuset/cpu/
+# pids) delegate, which is why --pids-limit works. The CLI detects this and
+# drops --memory/--cpus with a warning (see prepareSpawnResourceLimits).
 as_root mkdir -p /etc/docker
 as_root tee /etc/docker/daemon.json >/dev/null <<'DJEOF'
 {

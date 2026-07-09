@@ -48,19 +48,23 @@ func ReadClaudeConfig(configDir string) (map[string]string, error) {
 	return envs, nil
 }
 
-// sanitizeClaudeSettings strips host plugin enablement from a seeded
-// settings.json. Inside the container Claude Code would otherwise clone every
+// sanitizeClaudeSettings strips host-only keys from a seeded settings.json.
+// Plugin enablement: inside the container Claude Code would clone every
 // enabled marketplace into ~/.claude/plugins on first start — filling the
 // small .claude tmpfs (which then silently breaks session-transcript writes,
 // i.e. `berth logs`/`berth output`) with repos that are host preferences, not
-// sandbox ones. Unparseable settings are passed through untouched.
+// sandbox ones. Hooks: ~/.claude is a noexec tmpfs in the container, so
+// seeded hook scripts can never execute — every matching tool call would log
+// "Permission denied" noise. Hooks that should run inside the sandbox belong
+// in the repo's own .claude/settings.json, which berth doesn't touch.
+// Unparseable settings are passed through untouched.
 func sanitizeClaudeSettings(data []byte) []byte {
 	var settings map[string]json.RawMessage
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return data
 	}
 	changed := false
-	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces", "hooks"} {
 		if _, ok := settings[key]; ok {
 			delete(settings, key)
 			changed = true
@@ -191,9 +195,12 @@ func extractClaudeAccessToken(secret string) string {
 	}
 }
 
-// ReadClaudeSupportFiles tars CLAUDE.md, hooks/, commands/, statusline-command.sh
+// ReadClaudeSupportFiles tars CLAUDE.md, commands/, statusline-command.sh
 // from configDir and returns them as BERTH_CLAUDE_SUPPORT_B64.
 // The entrypoint extracts this into ~/.claude/ inside the container.
+// hooks/ is deliberately NOT seeded: ~/.claude is a noexec tmpfs in the
+// container, so hook scripts could never execute there (the hooks key is
+// stripped from the seeded settings.json for the same reason).
 func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 	envs := make(map[string]string)
 
@@ -209,7 +216,7 @@ func ReadClaudeSupportFiles(configDir string) (map[string]string, error) {
 			entries = append(entries, entry{name, false})
 		}
 	}
-	for _, name := range []string{"hooks", "commands"} {
+	for _, name := range []string{"commands"} {
 		p := filepath.Join(configDir, name)
 		if info, err := os.Lstat(p); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			entries = append(entries, entry{name, true})

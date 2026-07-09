@@ -160,8 +160,40 @@ func TestPrepareSpawnResourceLimits_RejectsExplicitLimitsOnThreadedCgroup(t *tes
 	if err == nil {
 		t.Fatal("expected explicit memory limit to fail on threaded cgroup")
 	}
-	if !strings.Contains(err.Error(), "threaded") {
+	if !strings.Contains(err.Error(), "memory cgroup controller") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPrepareSpawnResourceLimits_OmitsLimitsWhenMemoryNotDelegated(t *testing.T) {
+	fake := vmexec.NewFake()
+	// Domain cgroup type (not threaded), but the root subtree only delegates
+	// threaded-capable controllers — the steady state on Apple container VMs.
+	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "domain\n")
+	fake.SetResponse("cat /sys/fs/cgroup/cgroup.subtree_control", "cpuset cpu pids\n")
+	resolved := spawnResolved{Memory: "8g", CPUs: "4"}
+
+	err := prepareSpawnResourceLimits(context.Background(), fake, SpawnOpts{}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnResourceLimits() error = %v", err)
+	}
+	if resolved.Memory != "" || resolved.CPUs != "" {
+		t.Fatalf("expected memory/cpus omitted, got memory=%q cpus=%q", resolved.Memory, resolved.CPUs)
+	}
+}
+
+func TestPrepareSpawnResourceLimits_KeepsLimitsWhenMemoryDelegated(t *testing.T) {
+	fake := vmexec.NewFake()
+	fake.SetResponse("bash -lc cat /sys/fs/cgroup/docker/cgroup.type", "domain\n")
+	fake.SetResponse("cat /sys/fs/cgroup/cgroup.subtree_control", "cpuset cpu io memory pids\n")
+	resolved := spawnResolved{Memory: "8g", CPUs: "4"}
+
+	err := prepareSpawnResourceLimits(context.Background(), fake, SpawnOpts{}, &resolved)
+	if err != nil {
+		t.Fatalf("prepareSpawnResourceLimits() error = %v", err)
+	}
+	if resolved.Memory != "8g" || resolved.CPUs != "4" {
+		t.Fatalf("expected limits kept, got memory=%q cpus=%q", resolved.Memory, resolved.CPUs)
 	}
 }
 
