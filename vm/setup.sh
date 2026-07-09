@@ -73,13 +73,11 @@ wait_for_docker_process_exit() {
 
 start_dockerd_once() {
   # Supervise dockerd under busybox init (::respawn: in /etc/inittab) instead
-  # of nohup-ing it from this session: machine-run exec sessions live inside a
-  # cgroup namespace rooted at a threaded/populated cgroup, so a dockerd
-  # started here can never delegate domain controllers (memory/io) to
-  # container cgroups and Docker rejects --memory/--cpus ("cannot enter
-  # cgroupv2 ... invalid state"). init's children run under the real root
-  # cgroup where delegation works. Bonus: dockerd survives VM reboots and
-  # crashes without re-running setup.
+  # of nohup-ing it from this session: init restarts it if it ever dies and
+  # brings it back after a VM reboot without re-running setup. (This does NOT
+  # enable --memory/--cpus — domain-controller delegation is impossible on
+  # Apple container machines regardless of who starts dockerd; see the cgroup
+  # note in the Docker-config step below.)
   as_root mkdir -p /var/log
   as_root tee /usr/local/bin/berth-dockerd-run >/dev/null <<'DKRUN'
 #!/bin/sh
@@ -89,13 +87,19 @@ dockerd --host=unix:///var/run/docker.sock >> /var/log/dockerd.log 2>&1
 sleep 5
 DKRUN
   as_root chmod 0755 /usr/local/bin/berth-dockerd-run
-  if ! as_root grep -q 'berth-dockerd-run' /etc/inittab 2>/dev/null; then
-    echo '::respawn:/usr/local/bin/berth-dockerd-run' | as_root tee -a /etc/inittab >/dev/null
+  # Detach the supervisor BEFORE killing dockerd: on a re-provisioned VM init
+  # would otherwise respawn dockerd while we are still removing its pid file
+  # and socket, racing the fresh start below.
+  if as_root grep -q 'berth-dockerd-run' /etc/inittab 2>/dev/null; then
+    as_root sed -i '/berth-dockerd-run/d' /etc/inittab
+    as_root kill -HUP 1
   fi
+  as_root pkill -f berth-dockerd-run >/dev/null 2>&1 || true
   as_root pkill dockerd >/dev/null 2>&1 || true
   as_root pkill containerd >/dev/null 2>&1 || true
   wait_for_docker_process_exit
   as_root rm -f /var/run/docker.pid /var/run/docker.sock
+  echo '::respawn:/usr/local/bin/berth-dockerd-run' | as_root tee -a /etc/inittab >/dev/null
   as_root kill -HUP 1
 }
 

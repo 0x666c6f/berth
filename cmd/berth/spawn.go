@@ -662,7 +662,7 @@ func prepareSpawnResourceLimits(ctx context.Context, exec vmexec.Executor, opts 
 	if resolved.Memory == "" && resolved.CPUs == "" {
 		return nil
 	}
-	if !dockerCgroupIsThreaded(ctx, exec) && vmDelegatesMemoryController(ctx, exec) {
+	if vmDelegatesMemoryController(ctx, exec) {
 		return nil
 	}
 	if opts.Memory != "" || opts.CPUs != "" {
@@ -705,14 +705,6 @@ func prepareSpawnEvidence(ctx context.Context, exec vmexec.Executor, opts SpawnO
 	}
 	resolved.EvidenceVolume = volName
 	return nil
-}
-
-func dockerCgroupIsThreaded(ctx context.Context, exec vmexec.Executor) bool {
-	out, err := exec.Run(ctx, "bash", "-lc", "cat /sys/fs/cgroup/docker/cgroup.type /sys/fs/cgroup/cgroup.type 2>/dev/null || true")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.TrimSpace(string(out)), "threaded")
 }
 
 func buildSpawnRunCmd(opts SpawnOpts, resolved spawnResolved) *docker.DockerRunCmd {
