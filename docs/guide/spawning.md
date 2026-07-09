@@ -100,6 +100,8 @@ berth spawn claude --memory 12g --cpus 6 --pids-limit 1024 --repo ...
 
 Defaults: 8g memory, 4 CPUs, 512 PIDs, dedicated managed bridge network. For an internet-free sandbox, use an internal network — see [Architecture](../architecture.md#networking).
 
+> **Apple container machine limitation:** the VM kernel never delegates the memory/io cgroup controllers to Docker (vminitd owns the hierarchy from outside the guest), so `--memory`/`--cpus` cannot be enforced there — berth drops the defaults with a warning and rejects explicit values. `--pids-limit` is enforced normally.
+
 ## Naming and behavior
 
 ```bash

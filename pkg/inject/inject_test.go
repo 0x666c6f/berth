@@ -99,15 +99,13 @@ func TestReadClaudeConfigStripsPluginEnablement(t *testing.T) {
 	if err := json.Unmarshal(decoded, &got); err != nil {
 		t.Fatalf("seeded settings not valid JSON: %v", err)
 	}
-	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces"} {
+	for _, key := range []string{"enabledPlugins", "extraKnownMarketplaces", "hooks"} {
 		if _, ok := got[key]; ok {
 			t.Errorf("seeded settings still contain %q", key)
 		}
 	}
-	for _, key := range []string{"model", "hooks"} {
-		if _, ok := got[key]; !ok {
-			t.Errorf("seeded settings lost %q", key)
-		}
+	if _, ok := got["model"]; !ok {
+		t.Errorf("seeded settings lost %q", "model")
 	}
 }
 
@@ -477,20 +475,27 @@ func TestReadAWSCredentialsPropagatesRegionEnv(t *testing.T) {
 
 func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
-		t.Fatalf("mkdir hooks: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, "commands"), 0o755); err != nil {
+		t.Fatalf("mkdir commands: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("host instructions"), 0o644); err != nil {
 		t.Fatalf("write CLAUDE.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "hooks", "pre-commit.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write hook: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "commands", "review.md"), []byte("review the diff\n"), 0o644); err != nil {
+		t.Fatalf("write command: %v", err)
 	}
-	if err := os.Symlink("/etc/passwd", filepath.Join(dir, "hooks", "leak")); err != nil {
+	if err := os.Symlink("/etc/passwd", filepath.Join(dir, "commands", "leak")); err != nil {
 		t.Fatalf("create symlink: %v", err)
 	}
-	if err := syscall.Mkfifo(filepath.Join(dir, "hooks", "pipe"), 0o600); err != nil {
+	if err := syscall.Mkfifo(filepath.Join(dir, "commands", "pipe"), 0o600); err != nil {
 		t.Fatalf("create fifo: %v", err)
+	}
+	// hooks/ must NOT be seeded (noexec tmpfs in the container).
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "pre-commit.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
 	}
 
 	envs, err := ReadClaudeSupportFiles(dir)
@@ -528,14 +533,17 @@ func TestReadClaudeSupportFiles_SkipsSymlinks(t *testing.T) {
 	if !contains(names, "CLAUDE.md") {
 		t.Fatalf("expected CLAUDE.md in archive, got %v", names)
 	}
-	if !contains(names, "hooks/pre-commit.sh") {
-		t.Fatalf("expected hook file in archive, got %v", names)
+	if !contains(names, "commands/review.md") {
+		t.Fatalf("expected command file in archive, got %v", names)
 	}
-	if contains(names, "hooks/leak") {
+	if contains(names, "commands/leak") {
 		t.Fatalf("did not expect symlink target in archive, got %v", names)
 	}
-	if contains(names, "hooks/pipe") {
+	if contains(names, "commands/pipe") {
 		t.Fatalf("did not expect fifo in archive, got %v", names)
+	}
+	if contains(names, "hooks/pre-commit.sh") {
+		t.Fatalf("hooks must not be seeded (noexec tmpfs), got %v", names)
 	}
 }
 
